@@ -13,7 +13,8 @@ import { ResourceService } from './services/resourceService';
 import { CategoryTreeProvider } from './tree/categoryTreeProvider';
 import { OptionsTreeProvider } from './tree/optionsTreeProvider';
 import { OverviewTreeProvider } from './tree/overviewTreeProvider';
-import { DiscoverTreeProvider } from './tree/discoverTreeProvider';
+// Discover moved to webview provider implementation
+import { DiscoverWebviewProvider } from './webviews/discoverWebviewProvider';
 import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
 import { handleErrorWithNotification, getErrorMessage } from './utils/errors';
@@ -135,7 +136,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		(resourceService as any).setLogger?.(logger.asFunction());
 		// Create tree providers for each category and overview
 		const overviewTree = new OverviewTreeProvider();
-		const discoverTree = new DiscoverTreeProvider();
+		const discoverProvider = new DiscoverWebviewProvider(context);
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
@@ -283,7 +284,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Helper function to refresh all tree providers
 		function refreshAllTrees() {
 			overviewTree.refresh();
-			discoverTree.refresh();
 			chatmodesTree.refresh();
 			instructionsTree.refresh();
 			promptsTree.refresh();
@@ -533,7 +533,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			}),
 			vscode.window.registerTreeDataProvider('copilotCatalogOverview', overviewTree),
-			vscode.window.registerTreeDataProvider('copilotCatalogDiscover', discoverTree),
+			vscode.window.registerWebviewViewProvider(DiscoverWebviewProvider.viewType, discoverProvider),
 			vscode.window.registerTreeDataProvider('copilotCatalogChatmodes', chatmodesTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogInstructions', instructionsTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogPrompts', promptsTree),
@@ -1099,12 +1099,19 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			}),
 			vscode.commands.registerCommand('copilotCatalog.discover.begin', async () => {
-				try {
-					await logger.info('Begin Discovery invoked (placeholder)');
-					vscode.window.showInformationMessage('Discovery starting… (placeholder)');
-				} catch (e:any) {
-					await logger.warn('Begin Discovery error: ' + getErrorMessage(e));
-				}
+				await logger.info('Begin Discovery invoked (webview)');
+				vscode.window.showInformationMessage('Discovery starting… (placeholder)');
+			}),
+			vscode.commands.registerCommand('copilotCatalog.discover.search', async () => {
+				// For programmatic invocation (not from webview) - prompt then update webview
+				const query = await vscode.window.showInputBox({ prompt: 'Search shared Hats', placeHolder: 'Type keywords' });
+				if(query === undefined) return;
+				await logger.info('Discover search query=' + query);
+				const fake = query.trim() ? [
+					{ id: 'result:1', label: `Sample Hat for "${query}"`, description: 'Placeholder result (not from backend yet)' },
+					{ id: 'result:2', label: `Another match: ${query.toUpperCase()}`, description: 'Second placeholder item' }
+				] : [];
+				discoverProvider.setResults(query, fake);
 			}),
 			vscode.commands.registerCommand('copilotCatalog.addCatalogDirectory', async () => {
 				const cfg = vscode.workspace.getConfiguration();
