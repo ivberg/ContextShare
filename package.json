@@ -143,6 +143,11 @@
           "when": "copilotCatalog.hasResources"
         },
         {
+          "id": "copilotCatalogDiscover",
+          "name": "Discover",
+          "icon": "$(search)"
+        },
+        {
           "id": "copilotCatalogOptions",
           "name": "Options",
           "icon": "$(gear)"
@@ -259,6 +264,11 @@
       {
         "command": "copilotCatalog.user.enable",
         "title": "User: Enable"
+      },
+      {
+        "command": "copilotCatalog.discover.begin",
+        "title": "ContextShare: Begin Discovery",
+        "icon": "$(search)"
       }
     ],
     "menus": {

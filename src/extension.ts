@@ -13,6 +13,7 @@ import { ResourceService } from './services/resourceService';
 import { CategoryTreeProvider } from './tree/categoryTreeProvider';
 import { OptionsTreeProvider } from './tree/optionsTreeProvider';
 import { OverviewTreeProvider } from './tree/overviewTreeProvider';
+import { DiscoverTreeProvider } from './tree/discoverTreeProvider';
 import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
 import { handleErrorWithNotification, getErrorMessage } from './utils/errors';
@@ -134,6 +135,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		(resourceService as any).setLogger?.(logger.asFunction());
 		// Create tree providers for each category and overview
 		const overviewTree = new OverviewTreeProvider();
+		const discoverTree = new DiscoverTreeProvider();
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
@@ -281,6 +283,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Helper function to refresh all tree providers
 		function refreshAllTrees() {
 			overviewTree.refresh();
+			discoverTree.refresh();
 			chatmodesTree.refresh();
 			instructionsTree.refresh();
 			promptsTree.refresh();
@@ -530,6 +533,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			}),
 			vscode.window.registerTreeDataProvider('copilotCatalogOverview', overviewTree),
+			vscode.window.registerTreeDataProvider('copilotCatalogDiscover', discoverTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogChatmodes', chatmodesTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogInstructions', instructionsTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogPrompts', promptsTree),
@@ -1092,6 +1096,14 @@ export async function activate(context: vscode.ExtensionContext) {
 							await vscode.window.showTextDocument(vscode.Uri.file(settingsPath));
 						} catch(err:any){ await logger.warn('Failed to open settings.json: ' + (err?.message||err)); }
 					}
+				}
+			}),
+			vscode.commands.registerCommand('copilotCatalog.discover.begin', async () => {
+				try {
+					await logger.info('Begin Discovery invoked (placeholder)');
+					vscode.window.showInformationMessage('Discovery starting… (placeholder)');
+				} catch (e:any) {
+					await logger.warn('Begin Discovery error: ' + getErrorMessage(e));
 				}
 			}),
 			vscode.commands.registerCommand('copilotCatalog.addCatalogDirectory', async () => {
