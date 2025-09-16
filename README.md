@@ -9,9 +9,9 @@
 
 Unified AI workflow catalog for VS Code: manage and share chat modes, instructions, prompts, tasks - plus upcoming MCP server orchestration - across all your repositories from one consistent UI. Reduce prompt drift, standardize team AI usage, and reuse curated presets ("Hats").
 
-## ✨ Feature Highlights
+## Feature Highlights
 
-Core value: a single, structured, multi-catalog layer for AI assistant resources that become instantly available & activatable per workspace.
+Core value: a single, structured, multi-catalog layer for AI assistant resources that become instantly available and activatable per workspace.
 
 - Catalog aggregation (local folders + remote URLs)
 - Chat Modes (persona definitions)
@@ -20,72 +20,75 @@ Core value: a single, structured, multi-catalog layer for AI assistant resources
 - Tasks (JSON task configs)
 - MCP Integration (coming soon)
 - Hats (presets bundling multiple resources)
-- Real‑time sync & state tracking (INACTIVE / ACTIVE / MODIFIED)
-- Safe activation (never overwrites user‑created originals)
-- Secure: HTTPS-only remotes + path & filename sanitization
+- Real-time sync and state tracking (INACTIVE / ACTIVE / MODIFIED)
+- Safe activation (never overwrites user-created originals)
+- Secure: HTTPS-only remotes plus path and filename sanitization
 
 ### Feature Matrix
 
-| Category      | Purpose / Scope                     | Runtime Location                | Filename Pattern / Notes                | Status |
-|---------------|-------------------------------------|---------------------------------|-----------------------------------------|--------|
-| Chat Modes    | Persona / behavior definitions      | `.github/chatmodes/`            | `*.chatmode.md`                         | ✅     |
-| Instructions  | Shared guideline sets               | `.github/instructions/`         | `*.instructions.md` (legacy *.instruction.md) | ✅ |
-| Prompts       | Prompt templates / starters         | `.github/prompts/`              | `*.prompt.md`                           | ✅     |
-| Tasks         | Automation / action configurations  | `.github/tasks/`                | `*.task.json`                           | ✅     |
-| MCP Servers   | Model Context Protocol sources      | `.vscode/mcp.json`              | Merged composite file                   | � Coming soon |
-| Hats          | Declarative preset bundles          | `.github/hats/`                 | `*.json` (see example below)            | ✅     |
+| Category      | Purpose / Scope                     | Runtime Location                | Filename Pattern / Notes                | Status       |
+|---------------|-------------------------------------|---------------------------------|-----------------------------------------|--------------|
+| Chat Modes    | Persona / behavior definitions      | `.github/chatmodes/`            | `*.chatmode.md`                         | Available    |
+| Instructions  | Shared guideline sets               | `.github/instructions/`         | `*.instructions.md` (legacy `*.instruction.md`) | Available    |
+| Prompts       | Prompt templates / starters         | `.github/prompts/`              | `*.prompt.md`                           | Available    |
+| Tasks         | Automation / action configurations  | `.github/tasks/`                | `*.task.json`                           | Available    |
+| MCP Servers   | Model Context Protocol sources      | `.vscode/mcp.json`              | Merged composite file                   | Coming soon |
+| Hats          | Declarative preset bundles          | `.github/hats/`                 | `*.json` (see example below)            | Available    |
 
 State logic: ACTIVE resources are copied to runtime; MODIFIED indicates the runtime file diverged from its source (e.g., team-local customization).
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 Install from the VS Code Marketplace: [ContextShare](https://marketplace.visualstudio.com/items?itemName=contextshare.contextshare)
 
 ### Use in 5 Steps
 1. Open the ContextShare Activity Bar view.
-2. Add a catalog (Options → Add Catalog Directory… or add a remote HTTPS URL).
-3. Activate a resource (right‑click → Activate).
+2. Add a catalog (Options > Add Catalog Directory or add a remote HTTPS URL).
+3. Activate a resource (right-click -> Activate).
 4. (Optional) Apply a Hat preset to activate multiple at once.
 5. Edit runtime copies under `.github/**` if you need local tweaks (they'll show as MODIFIED).
 
 ### Hats (Presets)
-Hats are small JSON descriptors bundling chosen chat mode + instructions + prompts + tasks (+ soon MCP servers) into a one‑click activation set. Great for role or workflow switching (e.g., "Full Stack Review", "Security Audit").
+Hats are small JSON descriptors bundling chosen chat mode + instructions + prompts + tasks (+ soon MCP servers) into a one-click activation set. Great for role or workflow switching (e.g., "Full Stack Review", "Security Audit").
 
 ### Example Catalog Structure
 
 ```
 example-catalog/
-├── chatmodes/
-│   └── developer-assistant.chatmode.md
-├── instructions/
-│   └── code-review-guidelines.instructions.md
-├── prompts/
-│   └── bug-analysis.prompt.md
-├── tasks/
-│   └── automated-testing.task.json
-├── mcp/
-│   └── development-servers.mcp.json
-└── hats/
-    └── full-stack-dev.json
+    chatmodes/
+        developer-assistant.chatmode.md
+    instructions/
+        code-review-guidelines.instructions.md
+    prompts/
+        bug-analysis.prompt.md
+    tasks/
+        automated-testing.task.json
+    mcp/
+        development-servers.mcp.json
+    hats/
+        full-stack-dev.json
 ```
 
-## 📖 Documentation
+## Documentation
 
 - [Setup Guide](./SETUP_GUIDE.md) - Detailed installation and configuration instructions
 - [Software Architecture](./SOFTWARE_ARCHITECTURE_SPECIFICATION.md) - Technical architecture overview
 - [Test Plan](./TESTPLAN.md) - Testing strategies and test cases
 - [Changelog](./CHANGELOG.md) - Version history and release notes
 - [Catalog Display Names](./CATALOG_DISPLAY_NAMES_EXAMPLE.md) - Naming conventions and examples
+- [Remote Catalog API Guide](./docs/catalog/remote-catalog-api.md) - Contract for hosting catalogs over HTTPS
+- [Backend Auth Integration](./docs/catalog/backend-auth-integration.md) - Authenticated catalogs and OBO design
+- [Server Reference Design](./docs/server/server-reference-design.md) - Optional co-located backend
 
-## � Configuration Examples
+## Configuration Examples
 
 Add catalogs in `.vscode/settings.json`:
 
 ```jsonc
 {
     "contextshare.catalogs": [
-        "../team-ai-catalog", 
+        "../team-ai-catalog",
         "https://raw.githubusercontent.com/example-org/shared-ai-catalog/main/index.json"
     ]
 }
@@ -94,14 +97,11 @@ Add catalogs in `.vscode/settings.json`:
 Remote `index.json` (HTTPS only):
 
 ```json
-{
-    "version": 1,
-    "resources": [
-        "prompts/bug-analysis.prompt.md",
-        "instructions/code-review-guidelines.instructions.md",
-        "chatmodes/developer-assistant.chatmode.md"
-    ]
-}
+[
+    "prompts/bug-analysis.prompt.md",
+    "instructions/code-review-guidelines.instructions.md",
+    "chatmodes/developer-assistant.chatmode.md"
+]
 ```
 
 Sample Hat (`.github/hats/full-stack-dev.json`):
@@ -119,11 +119,11 @@ Sample Hat (`.github/hats/full-stack-dev.json`):
 
 Display Names: Provide friendly catalog labels via configuration so multiple catalogs can be visually distinguished in the tree (see `CATALOG_DISPLAY_NAMES_EXAMPLE.md`).
 
-## 🛠️ Development
+## Development
 
 Development details, build, and contribution workflow are documented in `CONTRIBUTING.md` and supporting architecture docs.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTING.md) for details.
 
@@ -138,18 +138,18 @@ We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTIN
 7. Push to the branch: `git push origin feature/amazing-feature`
 8. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🔒 Security & Privacy
+## Security & Privacy
 
 Focused on safe local workspace operations:
 
 - HTTPS-only remote catalog sources
-- Path traversal & filename sanitization
+- Path traversal and filename sanitization
 - User-created runtime resources are never deleted
-- No telemetry / tracking collected by this extension
+- No telemetry or tracking collected by this extension
 
 Resources:
 - [Security Policy](./SECURITY.md)
@@ -159,20 +159,19 @@ Resources:
 
 Report vulnerabilities privately via the Security Policy (responsible disclosure). Please avoid public issues for sensitive findings.
 
-## ❓ Troubleshooting
+## Troubleshooting
 
 | Issue | Possible Cause | Action |
 |-------|----------------|--------|
 | Resource not listed | Filename pattern mismatch | Verify suffix (e.g., `.prompt.md`, `.instructions.md`) |
 | Remote catalog empty | `index.json` not reachable / HTTP error | Open URL in browser; ensure HTTPS and correct raw path |
 | Resource shows MODIFIED unexpectedly | Local edit vs source catalog | Diff runtime file in `.github/**` with original source |
-| Removed MCP server persists | (Upcoming MCP feature) cached merged entry | After MCP feature release: remove from source & reload window |
+| Removed MCP server persists | (Upcoming MCP feature) cached merged entry | After MCP feature release: remove from source and reload window |
 | Hat not applying all items | Missing referenced filenames | Check JSON fields and ensure each resource exists |
 
 If stuck, enable verbose logging (future setting) or open an issue with a minimal reproduction.
 
-
-## 🏷️ Versioning
+## Versioning
 
 We use [Semantic Versioning](https://semver.org/) for release management:
 - **MAJOR**: Breaking changes
@@ -186,4 +185,3 @@ This project adheres to the [Contributor Covenant Code of Conduct](./CODE_OF_CON
 ## Trademarks
 
 All product names, logos, and brands are property of their respective owners. Use of any third-party trademarks or logos does not imply endorsement.
-
