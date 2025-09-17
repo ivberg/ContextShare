@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 import * as vscode from 'vscode';
+import { HatService } from '../services/hatService';
+import { RemoteHatService } from '../services/remoteHatService';
+import { Repository } from '../models';
 
 interface DiscoverResult { id: string; label: string; description?: string }
 
@@ -10,36 +13,60 @@ export class DiscoverWebviewProvider implements vscode.WebviewViewProvider {
   private lastQuery: string = '';
   private results: DiscoverResult[] = [];
 
-  constructor(private readonly context: vscode.ExtensionContext){ }
+  private repo?: Repository;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly hatService: HatService,
+    private readonly remote: RemoteHatService
+  ){ }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void | Thenable<void> {
     this._view = webviewView;
     webviewView.webview.options = { enableScripts: true }; // allow script for UI interactions
     this.render();
 
-    webviewView.webview.onDidReceiveMessage(msg => {
+    webviewView.webview.onDidReceiveMessage(async msg => {
       switch(msg.type){
         case 'discover.search':
           this.lastQuery = (msg.query||'').trim();
-          this.fakeSearch(this.lastQuery);
+          await this.performSearch(this.lastQuery);
           break;
         case 'discover.begin':
           vscode.window.showInformationMessage('Discovery starting… (placeholder)');
+          break;
+        case 'discover.action':
+          if(msg.action === 'activate' && msg.id){
+            await this.pullHatToWorkspace(String(msg.id));
+          }
           break;
       }
     });
   }
 
-  private fakeSearch(q: string){
-    if(!q){
-      this.results = [];
-    } else {
-      this.results = [
-        { id: 'r1', label: `Sample Hat for "${q}"`, description: 'Placeholder result' },
-        { id: 'r2', label: `Another match: ${q.toUpperCase()}`, description: 'Second placeholder item' }
-      ];
-    }
+  private async performSearch(q: string){
+    if(!q){ this.results = []; this.render(); return; }
+    const items = await this.remote.queryHats(q);
+    this.results = items.map(i => ({ id: i.id, label: i.name, description: i.description }));
     this.render();
+  }
+
+  setRepository(repo: Repository | undefined){ this.repo = repo; }
+
+  private async pullHatToWorkspace(id: string){
+    try {
+      if(!this.repo){ vscode.window.showWarningMessage('No repository available to save hat.'); return; }
+      const hat = await this.remote.getHat(id);
+      if(!hat){ vscode.window.showWarningMessage('Hat not found in remote store.'); return; }
+      // Save as a workspace hat using HatService
+      const saved = await this.hatService.createHatFromActive(hat.name, hat.description, [], 'workspace', this.repo);
+      // Overwrite the just-created placeholder with remote resources list
+      // Re-save to workspace with remote resource list
+      await this.hatService.saveHatToWorkspace(this.repo, { ...saved, resources: hat.resources });
+      vscode.window.showInformationMessage(`Saved Hat "${hat.name}" to workspace.`);
+    } catch (e:any) {
+      vscode.window.showErrorMessage('Failed to save hat: ' + (e?.message || e));
+    }
   }
 
   private getHtml(): string {

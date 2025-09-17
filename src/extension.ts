@@ -15,6 +15,7 @@ import { OptionsTreeProvider } from './tree/optionsTreeProvider';
 import { OverviewTreeProvider } from './tree/overviewTreeProvider';
 // Discover moved to webview provider implementation
 import { DiscoverWebviewProvider } from './webviews/discoverWebviewProvider';
+import { RemoteHatService } from './services/remoteHatService';
 import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
 import { handleErrorWithNotification, getErrorMessage } from './utils/errors';
@@ -134,16 +135,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		logger.init(context, { enableFileLogging, filePath: logFilePath, channelName: 'ContextShare' });
 		// Wire service-level logger so core operations emit to the output channel/file
 		(resourceService as any).setLogger?.(logger.asFunction());
-		// Create tree providers for each category and overview
+		// Create service instances and tree/webview providers
 		const overviewTree = new OverviewTreeProvider();
-		const discoverProvider = new DiscoverWebviewProvider(context);
+		const remoteHatService = new RemoteHatService();
+		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
+		const discoverProvider = new DiscoverWebviewProvider(context, hatService, remoteHatService);
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
 		const tasksTree = new CategoryTreeProvider(ResourceCategory.TASKS);
 	const mcpTree = new CategoryTreeProvider(ResourceCategory.MCP);
 	const optionsTree = new OptionsTreeProvider();
-		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
 
 		// Track whether we've warned user about read-only catalog views
 		let shownReadonlyNotice = false;
@@ -407,6 +409,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			tasksTree.setRepository(currentRepo, filteredResources);
 			mcpTree.setRepository(currentRepo, filteredResources);
 			// optionsTree has no resource dependency
+			// keep the webview provider aware of the current repository context
+			discoverProvider.setRepository(currentRepo);
 			
 			// Set context for showing/hiding views
 			const hasResources = filteredResources.length > 0;
@@ -1107,11 +1111,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				const query = await vscode.window.showInputBox({ prompt: 'Search shared Hats', placeHolder: 'Type keywords' });
 				if(query === undefined) return;
 				await logger.info('Discover search query=' + query);
-				const fake = query.trim() ? [
-					{ id: 'result:1', label: `Sample Hat for "${query}"`, description: 'Placeholder result (not from backend yet)' },
-					{ id: 'result:2', label: `Another match: ${query.toUpperCase()}`, description: 'Second placeholder item' }
-				] : [];
-				discoverProvider.setResults(query, fake);
+				const remote = await remoteHatService.queryHats(query);
+				discoverProvider.setResults(query, remote.map(r=> ({ id: r.id, label: r.name, description: r.description })));
 			}),
 			vscode.commands.registerCommand('copilotCatalog.addCatalogDirectory', async () => {
 				const cfg = vscode.workspace.getConfiguration();
