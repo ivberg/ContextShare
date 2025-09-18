@@ -55,17 +55,27 @@ export class DiscoverWebviewProvider implements vscode.WebviewViewProvider {
 
   private async pullHatToWorkspace(id: string){
     try {
-      if(!this.repo){ vscode.window.showWarningMessage('No repository available to save hat.'); return; }
+      if(!this.repo){ 
+        vscode.window.showWarningMessage('No repository available to save hat.'); 
+        return; 
+      }
+      
       const hat = await this.remote.getHat(id);
-      if(!hat){ vscode.window.showWarningMessage('Hat not found in remote store.'); return; }
-      // Save as a workspace hat using HatService
-      const saved = await this.hatService.createHatFromActive(hat.name, hat.description, [], 'workspace', this.repo);
-      // Overwrite the just-created placeholder with remote resources list
-      // Re-save to workspace with remote resource list
-      await this.hatService.saveHatToWorkspace(this.repo, { ...saved, resources: hat.resources });
-      vscode.window.showInformationMessage(`Saved Hat "${hat.name}" to workspace.`);
+      if(!hat){ 
+        vscode.window.showWarningMessage('Hat not found in remote store.'); 
+        return; 
+      }
+
+      // Use the new pullHat method to fetch resources and create local hat file
+      const success = await this.remote.pullHat(id, this.repo.rootPath);
+      
+      if (success) {
+        vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to workspace.`);
+      } else {
+        vscode.window.showErrorMessage(`Failed to pull hat "${hat.name}". Check that remote resources exist.`);
+      }
     } catch (e:any) {
-      vscode.window.showErrorMessage('Failed to save hat: ' + (e?.message || e));
+      vscode.window.showErrorMessage('Failed to pull hat: ' + (e?.message || e));
     }
   }
 
