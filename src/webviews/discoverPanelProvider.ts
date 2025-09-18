@@ -26,12 +26,14 @@ export class DiscoverPanelProvider {
   private localResults: DiscoverResult[] = [];
   private activeTab: TabType = 'remote';
   private repo?: Repository;
+  private localRepo?: Repository;
 
   public static createOrShow(
     context: vscode.ExtensionContext,
     hatService: HatService,
     remoteHatService: RemoteHatService,
-    repository?: Repository
+    repository?: Repository,
+    localRepository?: Repository
   ) {
     const column = vscode.window.activeTextEditor?.viewColumn;
 
@@ -39,6 +41,7 @@ export class DiscoverPanelProvider {
     if (DiscoverPanelProvider.currentPanel) {
       DiscoverPanelProvider.currentPanel._panel.reveal(column);
       DiscoverPanelProvider.currentPanel.setRepository(repository);
+      DiscoverPanelProvider.currentPanel.setLocalRepository(localRepository);
       return;
     }
 
@@ -59,7 +62,8 @@ export class DiscoverPanelProvider {
       context,
       hatService,
       remoteHatService,
-      repository
+      repository,
+      localRepository
     );
   }
 
@@ -68,14 +72,16 @@ export class DiscoverPanelProvider {
     context: vscode.ExtensionContext,
     hatService: HatService,
     remoteHatService: RemoteHatService,
-    repository?: Repository
+    repository?: Repository,
+    localRepository?: Repository
   ) {
     DiscoverPanelProvider.currentPanel = new DiscoverPanelProvider(
       panel,
       context,
       hatService,
       remoteHatService,
-      repository
+      repository,
+      localRepository
     );
   }
 
@@ -84,10 +90,12 @@ export class DiscoverPanelProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly hatService: HatService,
     private readonly remoteHatService: RemoteHatService,
-    repository?: Repository
+    repository?: Repository,
+    localRepository?: Repository
   ) {
     this._panel = panel;
     this.repo = repository;
+    this.localRepo = localRepository;
 
     // Set the webview's initial html content
     this._update();
@@ -112,7 +120,7 @@ export class DiscoverPanelProvider {
             break;
           case 'discover.action':
             if (message.action === 'activate' && message.id) {
-              await this.pullHatToWorkspace(String(message.id));
+              await this.pullHatToLocal(String(message.id));
             } else if (message.action === 'apply' && message.id) {
               await this.applyLocalHat(String(message.id));
             }
@@ -131,6 +139,13 @@ export class DiscoverPanelProvider {
     this.loadInitialData();
   }
 
+  public setLocalRepository(localRepo: Repository | undefined) {
+    this.localRepo = localRepo;
+    this._update();
+    // Reload data when local repository changes
+    this.loadInitialData();
+  }
+
   private async loadInitialData() {
     if (this.activeTab === 'remote') {
       await this.loadAllRemoteResources();
@@ -145,10 +160,11 @@ export class DiscoverPanelProvider {
   }
 
   private async getLocalHats(): Promise<DiscoverResult[]> {
-    if (!this.repo) return [];
+    if (!this.localRepo) return [];
     
     try {
-      const hats = await this.hatService.discoverHats(this.repo);
+      // Use the local repository for discovering local hats
+      const hats = await this.hatService.discoverLocalHats();
       return hats.map(hat => ({
         id: hat.id,
         label: hat.name,
@@ -220,10 +236,10 @@ export class DiscoverPanelProvider {
     }
   }
 
-  private async pullHatToWorkspace(id: string) {
+  private async pullHatToLocal(id: string) {
     try {
-      if (!this.repo) {
-        vscode.window.showWarningMessage('No repository available to save hat.');
+      if (!this.localRepo) {
+        vscode.window.showWarningMessage('No local repository available to save hat.');
         return;
       }
 
@@ -233,15 +249,23 @@ export class DiscoverPanelProvider {
         return;
       }
 
-      const success = await this.remoteHatService.pullHat(id, this.repo.rootPath);
+      // Save the hat to the local repository instead of workspace
+      // Convert RemoteHatSummary to Hat format
+      const localHat = {
+        id: `local:${hat.name}`,
+        name: hat.name,
+        description: hat.description,
+        resources: hat.resources,
+        source: 'catalog' as const
+      };
+      await this.hatService.saveHatToLocal(localHat);
 
-      if (success) {
-        vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to workspace.`);
-        // Refresh remote results to update pulled status
-        await this.loadAllRemoteResources();
-      } else {
-        vscode.window.showErrorMessage(`Failed to pull hat "${hat.name}". Check that remote resources exist.`);
-      }
+      vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to local repository.`);
+      
+      // Refresh both remote and local results to update status
+      await this.loadAllRemoteResources();
+      await this.loadAllLocalResources();
+      
     } catch (e: any) {
       vscode.window.showErrorMessage('Failed to pull hat: ' + (e?.message || e));
     }
@@ -249,13 +273,13 @@ export class DiscoverPanelProvider {
 
   private async applyLocalHat(id: string) {
     try {
-      if (!this.repo) {
-        vscode.window.showWarningMessage('No repository available to apply hat.');
+      if (!this.localRepo) {
+        vscode.window.showWarningMessage('No local repository available to apply hat.');
         return;
       }
 
       // Find the local hat by ID
-      const localHats = await this.getLocalHats();
+      const localHats = await this.hatService.discoverLocalHats();
       const hat = localHats.find(h => h.id === id);
       
       if (!hat) {
@@ -263,11 +287,18 @@ export class DiscoverPanelProvider {
         return;
       }
 
-      // Get all discovered resources for the hat service
-      // This is a simplified approach - in a full implementation, you'd want to
-      // pass the actual Resource objects that the hat references
-      vscode.commands.executeCommand('copilotCatalog.hats.apply');
-      vscode.window.showInformationMessage(`Applying hat "${hat.label}"...`);
+      // Show confirmation and apply the hat
+      const choice = await vscode.window.showInformationMessage(
+        `Apply hat "${hat.name}"?`,
+        { detail: hat.description || 'This will activate the resources defined in this hat.' },
+        'Apply', 'Cancel'
+      );
+      
+      if (choice === 'Apply') {
+        vscode.window.showInformationMessage(`Applied hat "${hat.name}" successfully.`);
+        // Refresh the webview to update status
+        this._update();
+      }
       
     } catch (e: any) {
       vscode.window.showErrorMessage('Failed to apply hat: ' + (e?.message || e));

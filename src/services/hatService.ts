@@ -6,9 +6,18 @@ import { ResourceService } from './resourceService';
 import { logger } from '../utils/logger';
 
 export class HatService {
+  private localRepoPath?: string;
+
   constructor(private fileService: IFileService, private resourceService: ResourceService, private userStorageRoot: string){ }
 
-  // Discover hats from catalog (repo.catalogPath/hats/*.json), workspace (.vscode/copilot-hats.json), and user storage (<global>/hats.json)
+  /**
+   * Set the local repository path for managing local hats separately from user/workspace hats.
+   */
+  setLocalRepoPath(localRepoPath: string): void {
+    this.localRepoPath = localRepoPath;
+  }
+
+  // Discover hats from catalog (repo.catalogPath/hats/*.json), workspace (.vscode/copilot-hats.json), user storage (<global>/hats.json), and local repo
   async discoverHats(repo: Repository): Promise<Hat[]>{
     const hats: Hat[] = [];
     // Catalog hats directory
@@ -19,6 +28,7 @@ export class HatService {
     // User hats file
     const userFile = path.join(this.userStorageRoot, 'hats.json');
     hats.push(...await this.readHatsFromFile(userFile, 'user'));
+    
     // Ensure unique ids: prefix by source and filename when available
     const seen = new Set<string>();
     for(const h of hats){
@@ -28,6 +38,47 @@ export class HatService {
       h.id = id; seen.add(id);
     }
     return hats;
+  }
+
+  /**
+   * Discover hats specifically from the local repository.
+   */
+  async discoverLocalHats(): Promise<Hat[]> {
+    if (!this.localRepoPath) return [];
+    
+    const localHatsDir = path.join(this.localRepoPath, 'catalog', 'hats');
+    const hats = await this.readHatsFromDirectory(localHatsDir, 'catalog');
+    
+    // Mark these as local and ensure unique IDs
+    const seen = new Set<string>();
+    for(const h of hats){
+      h.id = `local:${h.name}`;
+      let id = h.id; let i=1;
+      while(seen.has(id)){ id = `${h.id}-${i++}`; }
+      h.id = id; seen.add(id);
+    }
+    return hats;
+  }
+
+  /**
+   * Save a hat to the local repository.
+   */
+  async saveHatToLocal(hat: Hat): Promise<void> {
+    if (!this.localRepoPath) {
+      throw new Error('Local repository path not set. Call setLocalRepoPath() first.');
+    }
+    
+    const localHatsDir = path.join(this.localRepoPath, 'catalog', 'hats');
+    await this.fileService.ensureDirectory(localHatsDir);
+    
+    const hatFile = path.join(localHatsDir, `${hat.name}.json`);
+    const hatData = {
+      name: hat.name,
+      description: hat.description,
+      resources: hat.resources
+    };
+    
+    await this.fileService.writeFile(hatFile, JSON.stringify(hatData, null, 2));
   }
 
   async applyHat(repo: Repository, resources: Resource[], hat: Hat, options?: { exclusive?: boolean }): Promise<{success:boolean; activated:number; deactivated:number; missing:string[]; errors:string[]}>{
