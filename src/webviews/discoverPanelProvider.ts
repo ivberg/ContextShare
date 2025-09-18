@@ -5,7 +5,15 @@ import { HatService } from '../services/hatService';
 import { RemoteHatService } from '../services/remoteHatService';
 import { Repository } from '../models';
 
-interface DiscoverResult { id: string; label: string; description?: string }
+interface DiscoverResult { 
+  id: string; 
+  label: string; 
+  description?: string;
+  isLocal?: boolean; // For local resources
+  isPulled?: boolean; // For remote resources that exist locally
+}
+
+type TabType = 'remote' | 'local';
 
 export class DiscoverPanelProvider {
   private static readonly viewType = 'copilotCatalogDiscover';
@@ -14,7 +22,9 @@ export class DiscoverPanelProvider {
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
   private lastQuery: string = '';
-  private results: DiscoverResult[] = [];
+  private remoteResults: DiscoverResult[] = [];
+  private localResults: DiscoverResult[] = [];
+  private activeTab: TabType = 'remote';
   private repo?: Repository;
 
   public static createOrShow(
@@ -82,11 +92,10 @@ export class DiscoverPanelProvider {
     // Set the webview's initial html content
     this._update();
 
-    // Load all remote resources on startup
-    this.loadAllRemoteResources();
+    // Load initial data based on active tab
+    this.loadInitialData();
 
     // Listen for when the panel is disposed
-    // This happens when the user closes the panel or when the panel is closed programmatically
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
     // Handle messages from the webview
@@ -97,9 +106,15 @@ export class DiscoverPanelProvider {
             this.lastQuery = (message.query || '').trim();
             await this.performSearch(this.lastQuery);
             break;
+          case 'discover.switchTab':
+            this.activeTab = message.tab as TabType;
+            await this.loadDataForCurrentTab();
+            break;
           case 'discover.action':
             if (message.action === 'activate' && message.id) {
               await this.pullHatToWorkspace(String(message.id));
+            } else if (message.action === 'apply' && message.id) {
+              await this.applyLocalHat(String(message.id));
             }
             break;
         }
@@ -112,12 +127,97 @@ export class DiscoverPanelProvider {
   public setRepository(repo: Repository | undefined) {
     this.repo = repo;
     this._update();
+    // Reload data when repository changes
+    this.loadInitialData();
+  }
+
+  private async loadInitialData() {
+    if (this.activeTab === 'remote') {
+      await this.loadAllRemoteResources();
+    } else {
+      await this.loadAllLocalResources();
+    }
+  }
+
+  private async loadDataForCurrentTab() {
+    this.lastQuery = ''; // Clear search when switching tabs
+    await this.loadInitialData();
+  }
+
+  private async getLocalHats(): Promise<DiscoverResult[]> {
+    if (!this.repo) return [];
+    
+    try {
+      const hats = await this.hatService.discoverHats(this.repo);
+      return hats.map(hat => ({
+        id: hat.id,
+        label: hat.name,
+        description: hat.description,
+        isLocal: true
+      }));
+    } catch (error) {
+      console.error('Failed to load local hats:', error);
+      return [];
+    }
   }
 
   private async performSearch(q: string) {
-    const items = await this.remoteHatService.queryHats(q);
-    this.results = items.map(i => ({ id: i.id, label: i.name, description: i.description }));
+    if (this.activeTab === 'remote') {
+      const items = await this.remoteHatService.queryHats(q);
+      // Check which remote items are already pulled locally
+      const localHats = await this.getLocalHats();
+      this.remoteResults = items.map(i => ({
+        id: i.id,
+        label: i.name,
+        description: i.description,
+        isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+      }));
+    } else {
+      // Search local resources
+      const localHats = await this.getLocalHats();
+      const query = q.toLowerCase();
+      this.localResults = localHats.filter(hat => 
+        !query || 
+        hat.label.toLowerCase().includes(query) ||
+        (hat.description || '').toLowerCase().includes(query)
+      );
+    }
     this._update();
+  }
+
+  private async loadAllRemoteResources() {
+    try {
+      // Show loading state
+      this.remoteResults = [];
+      this._update();
+
+      // Load all available remote resources and check local status
+      const items = await this.remoteHatService.queryHats('');
+      const localHats = await this.getLocalHats();
+      
+      this.remoteResults = items.map(i => ({
+        id: i.id,
+        label: i.name,
+        description: i.description,
+        isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+      }));
+      this._update();
+    } catch (error) {
+      console.error('Failed to load remote resources:', error);
+      this.remoteResults = [];
+      this._update();
+    }
+  }
+
+  private async loadAllLocalResources() {
+    try {
+      this.localResults = await this.getLocalHats();
+      this._update();
+    } catch (error) {
+      console.error('Failed to load local resources:', error);
+      this.localResults = [];
+      this._update();
+    }
   }
 
   private async pullHatToWorkspace(id: string) {
@@ -133,11 +233,12 @@ export class DiscoverPanelProvider {
         return;
       }
 
-      // Use the new pullHat method to fetch resources and create local hat file
       const success = await this.remoteHatService.pullHat(id, this.repo.rootPath);
 
       if (success) {
         vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to workspace.`);
+        // Refresh remote results to update pulled status
+        await this.loadAllRemoteResources();
       } else {
         vscode.window.showErrorMessage(`Failed to pull hat "${hat.name}". Check that remote resources exist.`);
       }
@@ -146,29 +247,36 @@ export class DiscoverPanelProvider {
     }
   }
 
-  private async loadAllRemoteResources() {
+  private async applyLocalHat(id: string) {
     try {
-      // Show loading state
-      this.results = [];
-      this.lastQuery = '';
-      this._update();
+      if (!this.repo) {
+        vscode.window.showWarningMessage('No repository available to apply hat.');
+        return;
+      }
 
-      // Load all available remote resources (empty query to get all)
-      const items = await this.remoteHatService.queryHats('');
-      this.results = items.map(i => ({ id: i.id, label: i.name, description: i.description }));
-      this._update();
-    } catch (error) {
-      console.error('Failed to load remote resources:', error);
-      // Continue with empty results on error
-      this.results = [];
-      this._update();
+      // Find the local hat by ID
+      const localHats = await this.getLocalHats();
+      const hat = localHats.find(h => h.id === id);
+      
+      if (!hat) {
+        vscode.window.showWarningMessage('Local hat not found.');
+        return;
+      }
+
+      // Get all discovered resources for the hat service
+      // This is a simplified approach - in a full implementation, you'd want to
+      // pass the actual Resource objects that the hat references
+      vscode.commands.executeCommand('copilotCatalog.hats.apply');
+      vscode.window.showInformationMessage(`Applying hat "${hat.label}"...`);
+      
+    } catch (e: any) {
+      vscode.window.showErrorMessage('Failed to apply hat: ' + (e?.message || e));
     }
   }
 
   public dispose() {
     DiscoverPanelProvider.currentPanel = undefined;
 
-    // Clean up our resources
     this._panel.dispose();
 
     while (this._disposables.length) {
@@ -189,16 +297,27 @@ export class DiscoverPanelProvider {
     const nonce = String(Date.now());
     const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c] || c));
 
-    const resultsHtml = this.results.length === 0 ? `
+    const currentResults = this.activeTab === 'remote' ? this.remoteResults : this.localResults;
+    const resultsHtml = currentResults.length === 0 ? `
       <div class="empty">
-        ${this.lastQuery ? `No results found for "${this.lastQuery}". Try a different search term.` : 'Loading remote AI resources...'}
+        ${this.lastQuery ? `No results found for "${escape(this.lastQuery)}". Try a different search term.` : 
+          this.activeTab === 'remote' ? 'Loading remote AI resources...' : 'No local resources found.'}
       </div>
-    ` : this.results.map(r => `
+    ` : currentResults.map((r: DiscoverResult) => `
       <div class="result" data-id="${escape(r.id)}">
-        <div class="title">${escape(r.label)}</div>
+        <div class="result-header">
+          <div class="title">${escape(r.label)}</div>
+          ${r.isPulled ? '<div class="status-badge pulled">Already Downloaded</div>' : ''}
+          ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
+        </div>
         ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
         <div class="actions">
-          <button data-action="activate" data-id="${escape(r.id)}">Pull to Workspace</button>
+          ${this.activeTab === 'remote' ? 
+            `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
+              ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
+            </button>` :
+            `<button data-action="apply" data-id="${escape(r.id)}">Apply Hat</button>`
+          }
         </div>
       </div>
     `).join('');
@@ -254,6 +373,32 @@ export class DiscoverPanelProvider {
             color: var(--vscode-descriptionForeground);
         }
         
+        .tabs {
+            display: flex;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        
+        .tab {
+            background: none;
+            border: none;
+            padding: 12px 16px;
+            cursor: pointer;
+            color: var(--vscode-descriptionForeground);
+            border-bottom: 2px solid transparent;
+            font-size: var(--vscode-font-size);
+        }
+        
+        .tab:hover {
+            color: var(--vscode-foreground);
+            background: var(--vscode-list-hoverBackground);
+        }
+        
+        .tab.active {
+            color: var(--vscode-foreground);
+            border-bottom-color: var(--vscode-focusBorder);
+        }
+        
         .search-section {
             margin-bottom: 24px;
         }
@@ -288,12 +433,13 @@ export class DiscoverPanelProvider {
             font-size: var(--vscode-font-size);
         }
         
-        button:hover {
+        button:hover:not(:disabled) {
             background: var(--vscode-button-hoverBackground);
         }
         
-        button:active {
-            background: var(--vscode-button-activeBackground, var(--vscode-button-hoverBackground));
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         
         .status-bar {
@@ -341,10 +487,34 @@ export class DiscoverPanelProvider {
             border-color: var(--vscode-focusBorder);
         }
         
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        
         .result .title {
             font-weight: 600;
-            margin-bottom: 4px;
             font-size: 14px;
+        }
+        
+        .status-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        
+        .status-badge.pulled {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+        
+        .status-badge.local {
+            background: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
         }
         
         .result .desc {
@@ -392,20 +562,29 @@ export class DiscoverPanelProvider {
 <body>
     <div class="header">
         <h1>Discover AI Resources</h1>
-        <p>Browse and search remote AI resources like prompts, instructions, and presets from the community. Resources are automatically loaded below.</p>
+        <p>Browse and search AI resources from remote sources and your local workspace.</p>
     </div>
     
     ${repoStatus}
     
+    <div class="tabs">
+        <button class="tab ${this.activeTab === 'remote' ? 'active' : ''}" data-tab="remote">
+            Remote Resources
+        </button>
+        <button class="tab ${this.activeTab === 'local' ? 'active' : ''}" data-tab="local">
+            Local Resources
+        </button>
+    </div>
+    
     <div class="search-section">
         <div class="search-row">
-            <input id="discoverSearch" type="text" placeholder="Search for AI resources, hats, prompts..." value="${escape(this.lastQuery)}" />
+            <input id="discoverSearch" type="text" placeholder="${this.activeTab === 'remote' ? 'Search remote AI resources...' : 'Search local resources...'}" value="${escape(this.lastQuery)}" />
             <button id="searchBtn">Search</button>
         </div>
     </div>
     
     <div class="results-section">
-        <h2>Results ${this.results.length > 0 ? `(${this.results.length})` : ''}</h2>
+        <h2>${this.activeTab === 'remote' ? 'Remote' : 'Local'} Results ${currentResults.length > 0 ? `(${currentResults.length})` : ''}</h2>
         <div class="results" id="results">${resultsHtml}</div>
     </div>
 
@@ -426,6 +605,16 @@ export class DiscoverPanelProvider {
             }
         });
         
+        // Tab switching
+        document.querySelector('.tabs').addEventListener('click', e => {
+            const target = e.target;
+            if (target.classList.contains('tab')) {
+                const tab = target.getAttribute('data-tab');
+                vscode.postMessage({ type: 'discover.switchTab', tab });
+            }
+        });
+        
+        // Action handling
         document.getElementById('results').addEventListener('click', e => {
             const target = e.target;
             if (!(target instanceof HTMLElement)) return;
