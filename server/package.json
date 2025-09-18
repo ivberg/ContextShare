@@ -1,0 +1,28 @@
+{
+  "name": "contextshare-server",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "generate:types": "echo 'No extra types to generate yet'",
+    "build": "tsc -p .",
+    "dev": "node --watch dist/index.js",
+    "start": "node dist/index.js",
+    "prebuild": "npm run generate:types || exit 0",
+  "test": "mocha --config .mocharc.cjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.10",
+    "@types/mocha": "^10.0.10",
+    "mocha": "^11.7.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0",
+    "supertest": "^7.1.1",
+    "@types/supertest": "^2.0.16"
+  }
+}

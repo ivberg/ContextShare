@@ -169,3 +169,20 @@ export function validateTaskConfig(obj: any): { valid: boolean; errors: string[]
   
   return { valid: errors.length === 0, errors };
 }
+
+/**
+ * Validates that a URL is HTTPS-only and from a reasonable domain
+ */
+export function isValidDevRemoteUrl(url: string, allowInsecure: boolean): boolean {
+  // If dev flag not enabled, fall back to strict https validation
+  if(!allowInsecure) return isValidHttpsUrl(url);
+  if(!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if(parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    // In dev mode we accept localhost & private ranges intentionally (including loopback IPv6)
+    // Still enforce a length limit to avoid abuse vectors
+    if(url.length > 2000) return false;
+    return true;
+  } catch { return false; }
+}

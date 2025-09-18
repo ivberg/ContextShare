@@ -39,14 +39,8 @@
           "type": "object",
           "default": {},
           "description": "Catalog paths and their display names. Each entry maps a catalog path (absolute path, relative to workspace, or http(s) URL) to its tree display text. If display text is empty, the folder name from the catalog path will be used.",
-          "patternProperties": {
-            ".*": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": {
-            "type": "string"
-          },
+          "patternProperties": {".*": {"type": "string"}},
+          "additionalProperties": {"type": "string"},
           "order": 10
         },
         "copilotCatalog.targetWorkspace": {
@@ -68,59 +62,43 @@
           "description": "TTL (seconds) for caching remote fetched resources (0 = no cache)",
           "order": 40
         },
-        "copilotCatalog.autoRefresh": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically refresh when files change",
-          "order": 50
+        "copilotCatalog.autoRefresh": {"type": "boolean", "default": true, "description": "Automatically refresh when files change", "order": 50},
+        "copilotCatalog.showModificationWarnings": {"type": "boolean", "default": true, "description": "Warn when activating over modified files", "order": 60},
+        "copilotCatalog.backupBeforeOverwrite": {"type": "boolean", "default": false, "description": "Create backups before overwriting files", "order": 70},
+        "copilotCatalog.defaultGrouping": {"type": "string", "enum": ["category","state","repository","flat"], "default": "category", "description": "Default grouping mode for tree view", "order": 80},
+        "copilotCatalog.taskMergeStrategy": {"type": "string", "enum": ["merge","replace","skip"], "default": "merge", "description": "Strategy for handling task conflicts", "order": 90},
+        "copilotCatalog.enableFileLogging": {"type": "boolean", "default": false, "description": "Mirror extension logs to a file under user global storage (privacy-friendly).", "order": 100},
+        "copilotCatalog.catalogFilter": {"type": "string", "default": "", "description": "Filter resources by catalog name. Leave empty to show all catalogs.", "order": 110},
+        "copilotCatalog.enableAuthenticatedSources": {"type": "boolean", "default": false, "description": "(Experimental) Enable authenticated remote catalog sources (adds auth header injection + token/session handling).", "order": 120},
+        "copilotCatalog.remoteSources": {
+          "type": "array",
+          "default": [],
+          "description": "(Experimental) Structured remote catalog sources with optional authentication strategies. Each entry can point at an index.json URL or a directory root. When enabled, these are merged with catalogDirectory mappings.",
+          "items": {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+              "url": {"type": "string", "description": "HTTPS URL to remote catalog (index.json or directory root)."},
+              "displayName": {"type": "string", "description": "Optional display name override for the catalog in the tree view."},
+              "auth": {"type": "string", "enum": ["none","bearerToken","vscodeAccount","custom"], "default": "none", "description": "Authentication strategy."},
+              "scopes": {"type": "array", "items": {"type": "string"}, "description": "Scopes for vscodeAccount strategy."},
+              "tokenSecretKey": {"type": "string", "description": "Secret storage key for bearer token."},
+              "customCommand": {"type": "string", "description": "Command ID returning auth headers (for custom strategy)."},
+              "disabled": {"type": "boolean", "default": false, "description": "If true this source is ignored."}
+            },
+            "additionalProperties": false
+          },
+          "order": 130
         },
-        "copilotCatalog.showModificationWarnings": {
-          "type": "boolean",
-          "default": true,
-          "description": "Warn when activating over modified files",
-          "order": 60
-        },
-        "copilotCatalog.backupBeforeOverwrite": {
-          "type": "boolean",
-          "default": false,
-          "description": "Create backups before overwriting files",
-          "order": 70
-        },
-        "copilotCatalog.defaultGrouping": {
-          "type": "string",
-          "enum": [
-            "category",
-            "state",
-            "repository",
-            "flat"
-          ],
-          "default": "category",
-          "description": "Default grouping mode for tree view",
-          "order": 80
-        },
-        "copilotCatalog.taskMergeStrategy": {
-          "type": "string",
-          "enum": [
-            "merge",
-            "replace",
-            "skip"
-          ],
-          "default": "merge",
-          "description": "Strategy for handling task conflicts",
-          "order": 90
-        },
-        "copilotCatalog.enableFileLogging": {
-          "type": "boolean",
-          "default": false,
-          "description": "Mirror extension logs to a file under user global storage (privacy-friendly).",
-          "order": 100
-        },
-        "copilotCatalog.catalogFilter": {
+        "copilotCatalog.remoteBase": {
           "type": "string",
           "default": "",
-          "description": "Filter resources by catalog name. Leave empty to show all catalogs.",
-          "order": 110
-        }
+          "description": "Single remote catalog base (absolute path or http(s) URL). Child folders chatmodes/, instructions/, prompts/, tasks/, mcp/ are fetched automatically (each must expose index.json for directory mode).",
+          "order": 131
+        },
+        "copilotCatalog.dev.allowInsecureHttp": {"type": "boolean", "default": false, "description": "(Development only) Allow HTTP and localhost/private IP remote catalog URLs for testing. DO NOT ENABLE in production workspaces.", "order": 140}
+  ,"copilotCatalog.dev.disableLogRedaction": {"type": "boolean", "default": false, "description": "(Development only) Disable path/URL redaction in logs to aid debugging. May expose local paths; do not enable in shared environments.", "order": 141}
+  ,"copilotCatalog.dev.showBuildTimestamp": {"type": "boolean", "default": false, "description": "(Development only) Show a status bar item with extension version + activation timestamp for quick confirmation you are on the latest reload.", "order": 142}
       }
     },
     "viewsContainers": {
@@ -258,6 +236,11 @@
         "command": "copilotCatalog.dev.configureSettings",
         "title": "ContextShare (Dev): Configure Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "copilotCatalog.dev.runtimeFlags",
+        "title": "ContextShare (Dev): Show Runtime Flags",
+        "icon": "$(debug-alt)"
       },
       {
         "command": "copilotCatalog.addCatalogDirectory",
@@ -412,6 +395,7 @@
     "vscode:prepublish": "npm install && npm run build",
     "build": "tsc -p . && npm run bundle",
     "watch": "tsc -w -p .",
+    "watch:bundle": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --platform=node --format=cjs --external:vscode --sourcemap --watch",
     "bundle": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --platform=node --format=cjs --external:vscode --sourcemap",
     "package": "echo 'vsce not installed in offline env'",
     "verify:version": "node scripts/verify-version-sync.js",

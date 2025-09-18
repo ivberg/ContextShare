@@ -3,9 +3,10 @@
 import * as fs from 'fs/promises';
 import { IncomingMessage } from 'http';
 import * as https from 'https';
+import * as http from 'http';
 import * as path from 'path';
 import { ActivateOptions, IFileService, IResourceService, OperationResult, Repository, Resource, ResourceCategory, ResourceState } from '../models';
-import { isSafeRelativeEntry, sanitizeFilename, isValidHttpsUrl, sanitizeErrorMessage, validateMcpConfig, validateTaskConfig } from '../utils/security';
+import { isSafeRelativeEntry, sanitizeFilename, isValidHttpsUrl, sanitizeErrorMessage, validateMcpConfig, validateTaskConfig, isValidDevRemoteUrl } from '../utils/security';
 import { getErrorMessage } from '../utils/errors';
 import { logger } from '../utils/logger';
 
@@ -22,17 +23,17 @@ export class ResourceService implements IResourceService {
   private currentWorkspaceRoot?: string;
   private runtimeDirectoryName: string = '.github'; // Default runtime directory
   private logger?: (msg: string) => void;
+  private allowInsecureHttp = false; // dev-only override
+  private disableLogRedaction = false; // dev-only: show raw paths/URLs
   constructor(private fileService: IFileService){}
 
   // Optional logger injected by host extension
   setLogger(fn?: (msg: string) => void){ this.logger = fn; }
   private log(msg: string){ 
     try { 
-      // Sanitize log messages to prevent information disclosure
-      const sanitized = sanitizeErrorMessage(msg);
-      this.logger?.(sanitized); 
+      const out = this.disableLogRedaction ? msg : sanitizeErrorMessage(msg);
+      this.logger?.(out); 
     } catch (error) { 
-      // Log to structured logger as fallback if injected logger fails (fire-and-forget)
       void logger.warn(`[ResourceService] Logger failed: ${getErrorMessage(error)}`);
     } 
   }
@@ -50,6 +51,18 @@ export class ResourceService implements IResourceService {
   setRuntimeDirectoryName(name: string){
     this.runtimeDirectoryName = name || '.github';
   this.log(`[ResourceService] setRuntimeDirectoryName=${this.runtimeDirectoryName}`);
+  }
+
+  /** Dev-only: permit HTTP and localhost sources */
+  enableInsecureHttpForDev(flag: boolean){
+    this.allowInsecureHttp = !!flag;
+    this.log(`[ResourceService] allowInsecureHttp=${this.allowInsecureHttp}`);
+  }
+
+  /** Dev-only: disable log redaction to aid debugging */
+  setDisableLogRedaction(flag: boolean){
+    this.disableLogRedaction = !!flag;
+    this.log(`[ResourceService] disableLogRedaction=${this.disableLogRedaction}`);
   }
 
   setSourceOverrides(overrides: Partial<Record<ResourceCategory,string>>){
@@ -96,6 +109,7 @@ export class ResourceService implements IResourceService {
   async discoverResources(repository: Repository): Promise<Resource[]> {
     const resources: Resource[] = [];
     const t0 = Date.now();
+    let remoteSuccess = 0, remoteFailed = 0;
     this.log(`[ResourceService] discoverResources start repo=${repository.name} catalog=${repository.catalogPath} rootOverride=${this.rootCatalogOverride || '(none)'} targetWs=${this.targetWorkspaceOverride || '(none)'} currentWs=${this.currentWorkspaceRoot || '(none)'} runtimeDir=${this.runtimeDirectoryName}`);
     // Unified root override mode (recursive, filename inference)
     if(this.rootCatalogOverride){
@@ -130,9 +144,11 @@ export class ResourceService implements IResourceService {
     for(const category of Object.values(ResourceCategory)){
       const override = this.sourceOverrides[category];
       if(override && /^https?:\/\//i.test(override)){
-        // Enhanced HTTPS-only validation for remote sources
-        if(!isValidHttpsUrl(override)) {
-          this.log(`[ResourceService] Skipping invalid or insecure URL: ${override}`);
+        // Enhanced validation; allow HTTP/localhost only when dev override is enabled
+        const urlValid = isValidDevRemoteUrl(override, this.allowInsecureHttp);
+        if(!urlValid) {
+          const guidance = this.allowInsecureHttp ? 'URL failed validation even with dev insecure flag enabled.' : 'Enable copilotCatalog.dev.allowInsecureHttp for http/localhost during development.';
+          this.log(`[ResourceService] Skipping invalid or insecure URL: ${override} :: ${guidance}`);
           continue;
         }
         const isDir = override.endsWith('/');
@@ -140,32 +156,42 @@ export class ResourceService implements IResourceService {
           if(isDir){
             // Expect index.json listing file names
             const indexUrl = (override.endsWith('/') ? override : (override + '/')) + 'index.json';
+            this.log(`[ResourceService] remote fetch index start category=${category} url=${indexUrl}`);
             const listingRaw = await this.fetchRemoteCached(indexUrl);
             const listing: string[] = JSON.parse(listingRaw);
+            this.log(`[ResourceService] remote fetch index success category=${category} count=${Array.isArray(listing)?listing.length:-1}`);
+            remoteSuccess++;
             for(const fname of listing){
               // Ignore unsafe entries and sanitize final filename used for caching/display
               if(!isSafeRelativeEntry(fname)) { continue; }
               const safeName = sanitizeFilename(fname);
               const fileUrl = (override.endsWith('/') ? override : (override + '/')) + encodeURIComponent(safeName);
               try {
+                this.log(`[ResourceService] remote fetch file start category=${category} url=${fileUrl}`);
                 const content = await this.fetchRemoteCached(fileUrl);
                 const abs = await this.cacheRemoteToDisk(repository, category, safeName, content);
                 const rel = path.join(CATEGORY_DIRS[category], safeName);
                 resources.push({ id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'});
+                this.log(`[ResourceService] remote fetch file success category=${category} name=${safeName} bytes=${content.length}`);
+                remoteSuccess++;
               } catch (error) { 
                 this.log(`[ResourceService] Failed to fetch individual file ${fileUrl}: ${getErrorMessage(error)}`);
               }
             }
           } else {
+            this.log(`[ResourceService] remote fetch single start category=${category} url=${override}`);
             const content = await this.fetchRemoteCached(override);
             const fileName = override.split('/').filter(Boolean).pop() || `${category}.txt`;
             const safeName = sanitizeFilename(fileName);
             const abs = await this.cacheRemoteToDisk(repository, category, safeName, content);
             const rel = path.join(CATEGORY_DIRS[category], safeName);
             resources.push({ id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'});
+            this.log(`[ResourceService] remote fetch single success category=${category} name=${safeName} bytes=${content.length}`);
+            remoteSuccess++;
           }
           } catch (e:any) { 
             this.log(`[ResourceService] remote source failed for ${category}: ${sanitizeErrorMessage(e)}`); 
+            remoteFailed++; 
             // Continue with other sources even if remote fails
           }
         continue;
@@ -255,7 +281,8 @@ export class ResourceService implements IResourceService {
   const dt = Date.now() - t0;
   const byCat: Record<string, number> = {};
   for(const r of resources){ byCat[r.category] = (byCat[r.category]||0)+1; }
-  this.log(`[ResourceService] discoverResources done ${dt}ms total=${resources.length} byCat=${JSON.stringify(byCat)}`);
+  const remoteInfo = (remoteSuccess + remoteFailed) > 0 ? ` remote=${remoteSuccess}✓/${remoteFailed}✗` : '';
+  this.log(`[ResourceService] discoverResources done ${dt}ms total=${resources.length} byCat=${JSON.stringify(byCat)}${remoteInfo}`);
   return resources;
   }
 
@@ -316,12 +343,16 @@ export class ResourceService implements IResourceService {
   private fetchRemoteWithRedirects(url: string, maxRedirects: number, maxBytes: number, timeoutMs: number): Promise<string> {
     return new Promise((resolve, reject) => {
       try {
-        if (!isValidHttpsUrl(url)) { 
+        if (!isValidDevRemoteUrl(url, this.allowInsecureHttp)) { 
           reject(new Error('Invalid or insecure URL provided')); 
           return; 
         }
 
-        const req = https.get(url, {
+        // Choose http or https module based on URL protocol
+        const parsedUrl = new URL(url);
+        const client = parsedUrl.protocol === 'http:' ? http : https;
+        
+        const req = client.get(url, {
           timeout: timeoutMs,
           headers: {
             'User-Agent': 'VSCode-ContextShare/1.0'
@@ -335,7 +366,7 @@ export class ResourceService implements IResourceService {
             }
             
             const location = res.headers.location as string;
-            if (!location || !isValidHttpsUrl(location)) {
+            if (!location || !isValidDevRemoteUrl(location, this.allowInsecureHttp)) {
               reject(new Error('Invalid redirect location'));
               return;
             }
@@ -373,16 +404,21 @@ export class ResourceService implements IResourceService {
     const entry = this.remoteCache.get(url);
     const now = Date.now();
     if(entry && (now - entry.timestamp) < this.remoteCacheTtlMs){ 
+      this.log(`[ResourceService] fetchRemoteCached CACHE HIT url=${this.disableLogRedaction ? url : '[URL]'} age=${Math.round((now - entry.timestamp)/1000)}s ttl=${Math.round(this.remoteCacheTtlMs/1000)}s`);
       return entry.content; 
     }
     
+    this.log(`[ResourceService] fetchRemoteCached CACHE MISS url=${this.disableLogRedaction ? url : '[URL]'} reason=${entry ? 'expired' : 'not_found'}`);
     const content = await this.fetchRemote(url);
     
     // Check content size before caching
     if(content.length <= this.remoteCacheMaxEntrySize){
       this.remoteCache.set(url, { timestamp: now, content });
+      this.log(`[ResourceService] fetchRemoteCached CACHED url=${this.disableLogRedaction ? url : '[URL]'} size=${content.length}b`);
       // Evict again if we're over the limit
       this.evictOldCacheEntries();
+    } else {
+      this.log(`[ResourceService] fetchRemoteCached NOT_CACHED url=${this.disableLogRedaction ? url : '[URL]'} size=${content.length}b > limit=${this.remoteCacheMaxEntrySize}b`);
     }
     
     return content;

@@ -17,6 +17,7 @@ import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
 import { handleErrorWithNotification, getErrorMessage } from './utils/errors';
 import { logger } from './utils/logger';
+import { normalizeRemoteBase } from './utils/remoteBase';
 
 // Initialize structured logger (writes to OutputChannel and optional file)
 const LOG_FILENAME = 'contextshare-debug.log';
@@ -224,8 +225,56 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		resourceService.setRuntimeDirectoryName(runtimeDirName);
 		resourceService.setRemoteCacheTtl(config.get<number>('copilotCatalog.remoteCacheTtlSeconds', 300));
+		// Status bar build timestamp (dev) cleaned implementation
+		const activateTimestamp = new Date();
+		const showBuildStampIfEnabled = () => {
+			const show = vscode.workspace.getConfiguration().get<boolean>('copilotCatalog.dev.showBuildTimestamp', false);
+			let item = (activate as any)._buildStatusItem as vscode.StatusBarItem | undefined;
+			if (show) {
+				if (!item) {
+					item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10001);
+					(activate as any)._buildStatusItem = item;
+					context.subscriptions.push(item);
+				}
+				let version = 'unknown';
+				try { version = require('../package.json').version || 'unknown'; } catch {}
+				item.text = `ContextShare v${version}`;
+				item.tooltip = `Activated: ${activateTimestamp.toLocaleString()}\nClick to refresh.`;
+				item.command = 'copilotCatalog.refresh';
+				item.show();
+			} else if (item) { item.hide(); }
+		};
+		showBuildStampIfEnabled();
+ 		try {
+ 			const allowInsecureInitial = config.get<boolean>('copilotCatalog.dev.allowInsecureHttp', false);
+ 			(resourceService as any).enableInsecureHttpForDev?.(!!allowInsecureInitial);
+ 			if(allowInsecureInitial){ await logger.warn('DEV MODE: Insecure HTTP/localhost remote catalogs ENABLED (activation)'); }
+ 			const disableRedaction = config.get<boolean>('copilotCatalog.dev.disableLogRedaction', false);
+ 			(resourceService as any).setDisableLogRedaction?.(!!disableRedaction);
+			if(disableRedaction){ await logger.warn('DEV MODE: Log redaction DISABLED (activation)'); }
+			showBuildStampIfEnabled();
+ 		} catch {}
+ 
+ 		// --- Single remoteBase -> derive category overrides ---
+		const remoteBaseRaw = (config.get<string>('copilotCatalog.remoteBase') || '').trim();
+		const info = normalizeRemoteBase(remoteBaseRaw);
+		if(info){
+			resourceService.setSourceOverrides(info.derived as any);
+			await logger.info(`remoteBase=${info.base} derived=${Object.keys(info.derived).join(',')}`);
+		}else{
+			resourceService.setSourceOverrides({} as any);
+			await logger.info('remoteBase not set; no category overrides');
+		}
 
+		// Build repositories (or virtual one for remote-only)
 		let repositories: Repository[] = await discoverRepositories(runtimeDirName);
+		if(repositories.length === 0 && info){
+			const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || context.globalStorageUri.fsPath;
+			const virtualCatalogRoot = path.join(wsRoot, '.contextshare-virtual-catalog');
+			try { await fs.mkdir(virtualCatalogRoot, { recursive: true }); } catch {}
+			repositories = [{ id: 'virtual-remote', name: 'RemoteCatalog', rootPath: wsRoot, catalogPath: virtualCatalogRoot, runtimePath: path.join(wsRoot, runtimeDirName), isActive: true }];
+			await logger.info('Created virtual repository (remoteBase)');
+		}
 		let currentRepo: Repository | undefined = repositories[0];
 		let resources: Resource[] = [];
 
@@ -267,9 +316,8 @@ export async function activate(context: vscode.ExtensionContext) {
 					try {
 						// Capture previous overrides so we can restore after each catalog scan
 						const prevRoot = (resourceService as any).rootCatalogOverride;
-						// Set ONLY for catalog scanning – user runtime scan must not use this root override
 						resourceService.setRootCatalogOverride(directory);
-						resourceService.setSourceOverrides({});
+						// Preserve remoteBase-derived overrides (if any) instead of clearing
 						const sourceResources = await resourceService.discoverResources(repository);
 						// Restore root override so subsequent user runtime discovery (later) uses target workspace
 						resourceService.setRootCatalogOverride(prevRoot);
@@ -383,39 +431,59 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 
 		async function ensureVirtualRepoIfNeeded(){
-			if(repositories.length>0) return;
-			const config = vscode.workspace.getConfiguration();
-			const catalogDirectories = config.get<Record<string, string>>('copilotCatalog.catalogDirectory', {});
-			const candidatePaths: string[] = [];
-			
-			for(const directory of Object.keys(catalogDirectories)){
-				if(path.isAbsolute(directory)) {
-					candidatePaths.push(directory);
-				} else {
-					const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-					if(ws) candidatePaths.push(path.join(ws, directory));
+				if(repositories.length>0) return;
+				const config = vscode.workspace.getConfiguration();
+				const catalogDirectories = config.get<Record<string, string>>('copilotCatalog.catalogDirectory', {});
+				const remoteBase = (config.get<string>('copilotCatalog.remoteBase')||'').trim();
+				await logger.info(`ensureVirtualRepoIfNeeded: repoCount=0 catalogDirs=${Object.keys(catalogDirectories).length} remoteBase=${remoteBase||'(none)'}`);
+				// Prefer catalogDirectories if present
+				if(Object.keys(catalogDirectories).length){
+					const candidatePaths: string[] = [];
+					for(const directory of Object.keys(catalogDirectories)){
+						if(path.isAbsolute(directory)) candidatePaths.push(directory); else {
+							const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath; if(ws) candidatePaths.push(path.join(ws, directory));
+						}
+					}
+					for(const abs of candidatePaths){
+						try {
+							await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+							const workspaceRoot = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]?.uri.fsPath) || undefined;
+							const virt = await deriveVirtualRepoFromOverride(abs, workspaceRoot);
+							if(virt){ repositories.push(virt); await logger.info(`Created virtual repository for external catalog: ${virt.catalogPath}`); break; }
+						} catch (e:any) { await logger.warn(`Virtual repo candidate failed ${abs}: ${getErrorMessage(e)}`); }
+					}
+				} else if(remoteBase) {
+					// Remote-base-only mode: create synthetic repo anchor
+					const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || config.get<string>('copilotCatalog.targetWorkspace') || context.globalStorageUri.fsPath;
+					const virtualCatalogRoot = path.join(wsRoot, '.contextshare-virtual-catalog');
+					try { await fs.mkdir(virtualCatalogRoot, { recursive: true }); } catch {}
+					repositories.push({ id: 'virtual-remote', name: 'RemoteCatalog', rootPath: wsRoot, catalogPath: virtualCatalogRoot, runtimePath: path.join(wsRoot, runtimeDirName), isActive: true });
+					await logger.info('Created virtual repository for remoteBase (refresh)');
 				}
-			}
-			
-			for(const abs of candidatePaths){
-				try {
-					await vscode.workspace.fs.stat(vscode.Uri.file(abs));
-					const workspaceRoot = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]?.uri.fsPath) || undefined;
-					const virt = await deriveVirtualRepoFromOverride(abs, workspaceRoot);
-					if(virt){ repositories.push(virt); await logger.info(`Created virtual repository for external catalog: ${virt.catalogPath}`); break; }
-				} catch (e:any) { await logger.warn(`Virtual repo candidate failed ${abs}: ${getErrorMessage(e)}`); }
-			}
 		}
 
 		async function refresh() {
 			try {
 				logger.info('Refresh started');
+				// Re-derive remoteBase overrides every refresh in case settings changed without event (edge cases)
+				try {
+					const cfgNow = vscode.workspace.getConfiguration();
+					const rbRaw = (cfgNow.get<string>('copilotCatalog.remoteBase')||'').trim();
+					const infoRB = normalizeRemoteBase(rbRaw);
+					if(infoRB){
+						(resourceService as any).setSourceOverrides?.(infoRB.derived);
+						await logger.info(`(refresh) remoteBase=${infoRB.base}`);
+					} else {
+						(resourceService as any).setSourceOverrides?.({});
+						await logger.info('(refresh) remoteBase not set');
+					}
+				} catch(e:any){ await logger.warn('(refresh) remoteBase derive failed: '+ getErrorMessage(e)); }
 				repositories = await discoverRepositories(runtimeDirName);
 				await ensureVirtualRepoIfNeeded();
 				if (!currentRepo || !repositories.find(r => r.id === currentRepo?.id)) {
 					currentRepo = repositories[0];
 					if(!currentRepo){
-						await logger.info('No repositories detected after refresh.');
+						await logger.info('No repositories detected after refresh (post virtual attempt).');
 					}
 				}
 				await loadResources();
@@ -469,6 +537,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.window.registerTreeDataProvider('copilotCatalogMcp', mcpTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogOptions', optionsTree),
 			vscode.commands.registerCommand('copilotCatalog.refresh', async () => refresh()),
+			vscode.commands.registerCommand('copilotCatalog.clearRemoteCache', async () => {
+				resourceService.clearRemoteCache();
+				vscode.window.showInformationMessage('Remote cache cleared');
+				logger.info('Remote cache cleared via command');
+			}),
 			vscode.commands.registerCommand('copilotCatalog.openResource', async (item: any) => {
 				const res = pickResourceFromItem(item);
 				if(!res) return;
@@ -505,18 +578,43 @@ export async function activate(context: vscode.ExtensionContext) {
 				try { res.state = await resourceService.getResourceState(res); refreshAllTrees(); updateStatus(); } catch {}
 			}),
 			vscode.commands.registerCommand('copilotCatalog.diagnostics', async () => {
-				const redact = (p?: string) => p ? path.basename(p) : p;
-				const config = vscode.workspace.getConfiguration();
-				const catalogDirectories = config.get<Record<string, string>>('copilotCatalog.catalogDirectory', {});
+				const cfg = vscode.workspace.getConfiguration();
+				const disableRedaction = cfg.get<boolean>('copilotCatalog.dev.disableLogRedaction', false);
+				const redact = (p?: string) => {
+					if(disableRedaction) return p;
+					return p ? path.basename(p) : p;
+				};
+				const catalogDirectories = cfg.get<Record<string, string>>('copilotCatalog.catalogDirectory', {});
 				const diag: any = {
 					catalogDirectories: Object.keys(catalogDirectories).map(redact),
 					repositories: repositories.map(r=>({id:r.id, catalogPath: redact(r.catalogPath), runtimePath: redact(r.runtimePath)})),
 					resourceCount: resources.length,
 					workspaceFolders: (vscode.workspace.workspaceFolders||[]).map((f: vscode.WorkspaceFolder)=>redact(f.uri.fsPath)),
-					runtimeDirName
+					runtimeDirName,
+					remoteBaseRaw: cfg.get<string>('copilotCatalog.remoteBase'),
+					insecureHttp: cfg.get<boolean>('copilotCatalog.dev.allowInsecureHttp', false),
+					logRedactionDisabled: disableRedaction
 				};
 				await logger.info('Diagnostics:\n'+ JSON.stringify(diag,null,2));
 				vscode.window.showInformationMessage('ContextShare diagnostics written to output channel.');
+			}),
+			vscode.commands.registerCommand('copilotCatalog.dev.runtimeFlags', async () => {
+				try {
+					const cfg = vscode.workspace.getConfiguration();
+					let version = 'unknown';
+					try { version = require('../package.json').version || 'unknown'; } catch {}
+					const flags = {
+						version,
+						allowInsecureHttp: cfg.get<boolean>('copilotCatalog.dev.allowInsecureHttp', false),
+						disableLogRedaction: cfg.get<boolean>('copilotCatalog.dev.disableLogRedaction', false),
+						showBuildTimestamp: cfg.get<boolean>('copilotCatalog.dev.showBuildTimestamp', false),
+						remoteBase: cfg.get<string>('copilotCatalog.remoteBase') || '(none)',
+						cacheTtlSeconds: cfg.get<number>('copilotCatalog.remoteCacheTtlSeconds', 0),
+						remoteCacheSize: (resourceService as any).remoteCache?.size || 0
+					};
+					await logger.info('RuntimeFlags:' + JSON.stringify(flags));
+					vscode.window.showInformationMessage('Runtime flags logged to output.');
+				} catch(e:any){ await logger.warn('Failed to log runtime flags: ' + getErrorMessage(e)); }
 			}),
 			vscode.commands.registerCommand('copilotCatalog.dumpResources', async () => {
 				await logger.info(`DumpResources: count=${resources.length}`);
@@ -1088,10 +1186,12 @@ export async function activate(context: vscode.ExtensionContext) {
 			const reloadKeys = [
 				'copilotCatalog.runtimeDirectory'
 			];
-					const refreshKeys = [
+			const refreshKeys = [
 				'copilotCatalog.catalogDirectory',
 				'copilotCatalog.remoteCacheTtlSeconds',
-				'copilotCatalog.targetWorkspace'
+				'copilotCatalog.targetWorkspace',
+				'copilotCatalog.dev.allowInsecureHttp',
+				'copilotCatalog.remoteBase'
 			];
 
 			const needsReload = reloadKeys.some(k => e.affectsConfiguration(k));
@@ -1115,16 +1215,45 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 				resourceService.setRuntimeDirectoryName(cfg.get<string>('copilotCatalog.runtimeDirectory', '.github'));
 				resourceService.setRemoteCacheTtl(cfg.get<number>('copilotCatalog.remoteCacheTtlSeconds', 300));
+				// Re-derive overrides from remoteBase
+				try {
+					const info2 = normalizeRemoteBase(cfg.get<string>('copilotCatalog.remoteBase')||'');
+					if(info2){
+						resourceService.setSourceOverrides(info2.derived as any);
+						await logger.info(`(config change) remoteBase=${info2.base}`);
+					}else{ resourceService.setSourceOverrides({} as any); }
+				} catch {}
+				// Re-apply dev insecure flag if changed
+				try {
+					const allowInsecure = cfg.get<boolean>('copilotCatalog.dev.allowInsecureHttp', false);
+					(resourceService as any).enableInsecureHttpForDev?.(!!allowInsecure);
+					if(allowInsecure){ await logger.warn('DEV MODE: Insecure HTTP/localhost remote catalogs ENABLED (config change)'); }
+					const disableRedaction = cfg.get<boolean>('copilotCatalog.dev.disableLogRedaction', false);
+					(resourceService as any).setDisableLogRedaction?.(!!disableRedaction);
+					if(disableRedaction){ await logger.warn('DEV MODE: Log redaction DISABLED (config change)'); }
+					// Update build stamp visibility if toggled
+					showBuildStampIfEnabled();
+				} catch {}
 				await logger.info('Configuration change: directories updated, refreshing...');
 				refresh();
 			}
-		}));
+ 		}));
 
 		// Watch runtime directory for edits to auto-refresh modified states quickly
 		if(currentRepo){
 			const runtimeGlob = new vscode.RelativePattern(currentRepo.runtimePath, '**/*');
 			const watcher = vscode.workspace.createFileSystemWatcher(runtimeGlob, false, false, false);
-			const schedule = () => setTimeout(()=> refresh(), 400);
+			
+			// Debounce refresh to prevent loops from rapid file changes
+			let refreshTimeout: NodeJS.Timeout | undefined;
+			const schedule = () => {
+				if(refreshTimeout) clearTimeout(refreshTimeout);
+				refreshTimeout = setTimeout(async () => {
+					logger.info('File watcher triggered refresh');
+					await refresh();
+				}, 2000); // Increased debounce time to 2 seconds
+			};
+			
 			watcher.onDidChange(schedule, null, context.subscriptions);
 			watcher.onDidCreate(schedule, null, context.subscriptions);
 			watcher.onDidDelete(schedule, null, context.subscriptions);

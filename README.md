@@ -39,6 +39,27 @@ State logic: ACTIVE resources are copied to runtime; MODIFIED indicates the runt
 
 ## Quick Start
 
+### Remote-Only (Fastest Path)
+If you have a hosted catalog server exposing category folders each with an `index.json`, you can consume everything without a local catalog. The value you provide for `remoteBase` is normalized (it can omit the trailing slash or even end with a category like `/instructions`):
+
+1. Open Settings (JSON) and set (examples all equivalent):
+   ```jsonc
+   // All normalize to https://your-server.example.com/catalog/
+   "copilotCatalog.remoteBase": "https://your-server.example.com/catalog"
+   // or
+   "copilotCatalog.remoteBase": "https://your-server.example.com/catalog/"
+   // or even (will strip the trailing category)
+   "copilotCatalog.remoteBase": "https://your-server.example.com/catalog/instructions"
+   ```
+2. (Dev only) If using plain HTTP or localhost for early testing add:
+   ```jsonc
+   "copilotCatalog.dev.allowInsecureHttp": true
+   ```
+3. Run the command: ContextShare: Refresh.
+4. Activate resources as needed; they’ll be copied into the runtime directory (default `.github`).
+
+To disable, clear `remoteBase` (set to empty string) and Refresh.
+
 ### Installation
 Install from the VS Code Marketplace: [ContextShare](https://marketplace.visualstudio.com/items?itemName=contextshare.contextshare)
 
@@ -80,8 +101,23 @@ example-catalog/
 - [Remote Catalog API Guide](./docs/catalog/remote-catalog-api.md) - Contract for hosting catalogs over HTTPS
 - [Backend Auth Integration](./docs/catalog/backend-auth-integration.md) - Authenticated catalogs and OBO design
 - [Server Reference Design](./docs/server/server-reference-design.md) - Optional co-located backend
+- [Server Implementation (Phase 0)](./server/README.md) - Reference backend code & roadmap
 
 ## Configuration Examples
+
+Add a remote base:
+```jsonc
+{
+  "copilotCatalog.remoteBase": "https://raw.example.net/team-catalog/"
+}
+```
+
+Legacy explicit directory mapping (optional if you maintain a local catalog copy):
+```jsonc
+{
+  "copilotCatalog.catalogDirectory": {"../team-ai-catalog": "Team"}
+}
+```
 
 Add catalogs in `.vscode/settings.json`:
 
@@ -146,10 +182,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Focused on safe local workspace operations:
 
-- HTTPS-only remote catalog sources
+- HTTPS-only remote catalog sources (a development-only escape hatch exists via `copilotCatalog.dev.allowInsecureHttp` to permit `http://` and localhost/private IP URLs strictly for local testing; never enable in production workspaces)
 - Path traversal and filename sanitization
 - User-created runtime resources are never deleted
 - No telemetry or tracking collected by this extension
+
+Remote base + dev override notes:
+- `copilotCatalog.remoteBase` must normally be HTTPS and public. 
+- Enabling `copilotCatalog.dev.allowInsecureHttp` permits localhost/private IP *only for development*. Never commit this setting enabled to shared repos.
 
 Resources:
 - [Security Policy](./SECURITY.md)
