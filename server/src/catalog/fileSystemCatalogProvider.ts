@@ -14,7 +14,7 @@ function sanitizeName(name: string): string {
 export class FileSystemCatalogProvider implements CatalogProvider {
   constructor(private root: string){}
 
-  private categoryDir(category: string){
+  private categoryDir(category: string): string {
     return path.join(this.root, category);
   }
 

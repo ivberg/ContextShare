@@ -1,32 +1,108 @@
 import express, { Request, Response, NextFunction } from 'express';
-import path from 'path';
-import fs from 'fs/promises';
+import * as _path from 'path';
+import * as _fs from 'fs/promises';
 import { logger } from '../logging/logger';
 import { ServerConfig } from '../config';
 import { FileSystemCatalogProvider } from '../catalog/fileSystemCatalogProvider';
+import { SqliteCatalogProvider } from '../catalog/sqliteCatalogProvider';
+import { CatalogProvider } from '../catalog/types';
+import { createDatabaseService, DatabaseService } from '../database/service';
+import { MigrationRunner } from '../database/migrationRunner';
 import { LruCache } from '../cache/lru';
 import { requestId } from './middleware/requestId';
 import { authGuard } from './middleware/authGuard';
+import { createAdminRoutes } from './routes/admin';
 
-export function createApp(opts: { config: ServerConfig, provider?: FileSystemCatalogProvider }){
+// Factory function to create the appropriate catalog provider
+function createProvider(config: ServerConfig, dbService?: DatabaseService): CatalogProvider {
+  switch (config.mode) {
+    case 'file':
+      if (!config.catalogRoot) {
+        throw new Error('CATALOG_ROOT is required for file mode');
+      }
+      return new FileSystemCatalogProvider(config.catalogRoot);
+    
+    case 'database':
+    case 'hybrid':
+      if (!config.databasePath) {
+        throw new Error('DATABASE_PATH is required for database mode');
+      }
+      if (!dbService) {
+        throw new Error('Database service is required for database mode');
+      }
+      return new SqliteCatalogProvider(dbService);
+    
+    default:
+      throw new Error(`Unsupported mode: ${config.mode}`);
+  }
+}
+
+// Helper function to initialize database if needed
+export async function initializeDatabase(config: ServerConfig): Promise<DatabaseService | undefined> {
+  if (config.mode === 'database' || config.mode === 'hybrid') {
+    if (!config.databasePath) {
+      throw new Error('DATABASE_PATH is required for database mode');
+    }
+    
+    const dbService = createDatabaseService({ 
+      filename: config.databasePath,
+      readonly: false 
+    });
+    
+    try {
+      await dbService.initialize();
+      
+      // Run migrations
+      const migrationRunner = new MigrationRunner(dbService);
+      await migrationRunner.runMigrations();
+      
+      logger.info({ databasePath: config.databasePath }, 'Database initialized successfully');
+      return dbService;
+    } catch (error) {
+      logger.error({ error: String(error), databasePath: config.databasePath }, 'Failed to initialize database');
+      if (config.mode === 'database') {
+        throw error;  // Fail hard in database-only mode
+      }
+      logger.warn('Falling back to file mode due to database initialization failure');
+      return undefined;
+    }
+  }
+  
+  return undefined;
+}
+
+export function createApp(opts: { config: ServerConfig, provider?: CatalogProvider, dbService?: DatabaseService }): express.Application {
   const { config } = opts;
   const app = express();
-  const provider = opts.provider || new FileSystemCatalogProvider(config.catalogRoot);
+  
+  // Create provider based on config mode if not provided
+  let provider: CatalogProvider;
+  if (opts.provider) {
+    provider = opts.provider;
+  } else {
+    provider = createProvider(config, opts.dbService);
+  }
+  
   const indexCache = new LruCache<string,string[]>({ max: 100, ttlMs: 60_000 });
   const allowedCategories = new Set(['chatmodes','instructions','prompts','tasks','mcp']);
 
   app.use(requestId());
   app.use(authGuard());
 
+  // Add admin routes for database mode
+  if ((config.mode === 'database' || config.mode === 'hybrid') && opts.dbService) {
+    app.use('/admin', createAdminRoutes(opts.dbService, indexCache));
+  }
+
   app.get('/healthz', (_req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', mode: config.mode });
   });
 
   // Minimal index.json & file serving (Phase 0, no auth)
   app.get('/catalog/:category/index.json', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const category = req.params.category;
-      if(!allowedCategories.has(category)) return res.status(404).json({ error: 'category_not_found' });
+      if(!allowedCategories.has(category)) {return res.status(404).json({ error: 'category_not_found' });}
       const cacheKey = `idx:${category}`;
       const cached = indexCache.get(cacheKey);
       if(cached){
@@ -43,7 +119,7 @@ export function createApp(opts: { config: ServerConfig, provider?: FileSystemCat
   app.get('/catalog/:category/:file', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { category, file } = req.params as any;
-      if(!allowedCategories.has(category)) return res.status(404).json({ error: 'category_not_found' });
+      if(!allowedCategories.has(category)) {return res.status(404).json({ error: 'category_not_found' });}
       const buf = await provider.read(category, file);
       const data = Buffer.isBuffer(buf) ? buf.toString('utf8') : buf;
       res.setHeader('Content-Type', inferContentType(file));
@@ -66,8 +142,15 @@ export function createApp(opts: { config: ServerConfig, provider?: FileSystemCat
     if(err && typeof err === 'object'){
       if(err.code === 'file_too_large'){ code = 'file_too_large'; status = 413; }
       else if(err.code === 'not_found'){ code = 'not_found'; status = 404; }
+      // Handle Zod validation errors
+      else if(err.name === 'ZodError' || err.issues){ 
+        code = 'validation_error'; 
+        status = 400; 
+        logger.error({ err: JSON.stringify(err.issues || err.errors), code });
+        return res.status(status).json({ error: code, details: err.issues || err.errors });
+      }
     }
-    logger.error({ err: String(err?.message || err), code });
+    logger.error({ err: String(err?.message ?? err), code });
     res.status(status).json({ error: code });
   });
 
@@ -75,7 +158,7 @@ export function createApp(opts: { config: ServerConfig, provider?: FileSystemCat
 }
 
 function inferContentType(file: string): string {
-  if(file.endsWith('.json')) return 'application/json';
-  if(file.endsWith('.md')) return 'text/markdown; charset=utf-8';
+  if(file.endsWith('.json')) {return 'application/json';}
+  if(file.endsWith('.md')) {return 'text/markdown; charset=utf-8';}
   return 'text/plain; charset=utf-8';
 }

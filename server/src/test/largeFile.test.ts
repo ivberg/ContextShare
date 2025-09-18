@@ -16,7 +16,7 @@ async function setupLargeFile(){
   return p;
 }
 
-const app = createApp({ config: { port:0, catalogRoot: tempDir } });
+const app = createApp({ config: { port:0, catalogRoot: tempDir, mode: 'file' } });
 
 describe('large file handling', () => {
   before(async () => { await setupLargeFile(); });

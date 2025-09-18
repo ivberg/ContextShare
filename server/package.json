@@ -9,20 +9,36 @@
     "dev": "node --watch dist/index.js",
     "start": "node dist/index.js",
     "prebuild": "npm run generate:types || exit 0",
-  "test": "mocha --config .mocharc.cjs"
+    "test": "mocha --config .mocharc.cjs",
+    "lint": "eslint src/**/*.ts",
+    "lint:error": "eslint src/**/*.ts --quiet",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "db:migrate": "kysely-migration-cli migrate",
+    "db:create-migration": "kysely-migration-cli create",
+    "migrate:single": "node dist/tools/migrate-cli.js single",
+    "migrate:batch": "node dist/tools/migrate-cli.js batch",
+    "migrate:init-config": "node dist/tools/migrate-cli.js init-config"
   },
   "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "commander": "^12.1.0",
     "express": "^4.19.2",
+    "kysely": "^0.27.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.14.10",
     "@types/mocha": "^10.0.10",
+    "@types/node": "^20.14.10",
+    "@types/supertest": "^2.0.16",
+    "@typescript-eslint/eslint-plugin": "^8.8.1",
+    "@typescript-eslint/parser": "^8.8.1",
+    "eslint": "^9.12.0",
+    "kysely-migration-cli": "^0.4.2",
     "mocha": "^11.7.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.0",
     "supertest": "^7.1.1",
-    "@types/supertest": "^2.0.16"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
   }
 }

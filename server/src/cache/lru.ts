@@ -6,7 +6,7 @@ export class LruCache<K,V>{
   private order: K[] = [];
   constructor(private opts: LruOptions){ }
 
-  set(key: K, value: V){
+  set(key: K, value: V): void {
     const now = Date.now();
     if(this.map.has(key)){
       this._touch(key);
@@ -20,7 +20,7 @@ export class LruCache<K,V>{
 
   get(key: K): V | undefined {
     const e = this.map.get(key);
-    if(!e) return undefined;
+    if(!e) {return undefined;}
     if(this.opts.ttlMs && (Date.now() - e.ts) > this.opts.ttlMs){
       this.delete(key);
       return undefined;
@@ -29,21 +29,21 @@ export class LruCache<K,V>{
     return e.value;
   }
 
-  delete(key: K){
+  delete(key: K): void {
     if(this.map.delete(key)){
       this.order = this.order.filter(k => k !== key);
     }
   }
 
-  private _touch(key: K){
+  private _touch(key: K): void {
     this.order = this.order.filter(k => k !== key);
     this.order.push(key);
   }
 
-  private _evict(){
+  private _evict(): void {
     while(this.order.length > this.opts.max){
       const k = this.order.shift();
-      if(k !== undefined) this.map.delete(k);
+      if(k !== undefined) {this.map.delete(k);}
     }
   }
 }

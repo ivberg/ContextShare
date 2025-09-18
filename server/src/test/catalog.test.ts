@@ -5,7 +5,7 @@ import request from 'supertest';
 import { createApp } from '../http/app';
 
 const catalogRoot = path.resolve(__dirname, '../../../example-catalog');
-const app = createApp({ config: { port: 0, catalogRoot } });
+const app = createApp({ config: { port: 0, catalogRoot, mode: 'file' } });
 
 describe('catalog endpoints', () => {
   it('lists index.json for existing category', async () => {

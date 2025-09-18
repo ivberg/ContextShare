@@ -1,5 +1,5 @@
 module.exports = {
-  require: ['ts-node/register/transpile-only'],
+  require: ['ts-node/register'],
   spec: ['src/**/*.test.ts'],
   extension: ['ts'],
   timeout: 5000,
