@@ -1101,10 +1101,6 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 			}),
-			vscode.commands.registerCommand('copilotCatalog.discover.begin', async () => {
-				await logger.info('Begin Discovery invoked (webview)');
-				vscode.window.showInformationMessage('Discovery starting… (placeholder)');
-			}),
 			vscode.commands.registerCommand('copilotCatalog.discover.search', async () => {
 				// Open the discover panel for interactive searching
 				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo);

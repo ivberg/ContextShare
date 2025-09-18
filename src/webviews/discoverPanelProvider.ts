@@ -82,6 +82,9 @@ export class DiscoverPanelProvider {
     // Set the webview's initial html content
     this._update();
 
+    // Load all remote resources on startup
+    this.loadAllRemoteResources();
+
     // Listen for when the panel is disposed
     // This happens when the user closes the panel or when the panel is closed programmatically
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -93,9 +96,6 @@ export class DiscoverPanelProvider {
           case 'discover.search':
             this.lastQuery = (message.query || '').trim();
             await this.performSearch(this.lastQuery);
-            break;
-          case 'discover.begin':
-            vscode.window.showInformationMessage('Discovery starting… (placeholder)');
             break;
           case 'discover.action':
             if (message.action === 'activate' && message.id) {
@@ -115,11 +115,6 @@ export class DiscoverPanelProvider {
   }
 
   private async performSearch(q: string) {
-    if (!q) {
-      this.results = [];
-      this._update();
-      return;
-    }
     const items = await this.remoteHatService.queryHats(q);
     this.results = items.map(i => ({ id: i.id, label: i.name, description: i.description }));
     this._update();
@@ -151,6 +146,25 @@ export class DiscoverPanelProvider {
     }
   }
 
+  private async loadAllRemoteResources() {
+    try {
+      // Show loading state
+      this.results = [];
+      this.lastQuery = '';
+      this._update();
+
+      // Load all available remote resources (empty query to get all)
+      const items = await this.remoteHatService.queryHats('');
+      this.results = items.map(i => ({ id: i.id, label: i.name, description: i.description }));
+      this._update();
+    } catch (error) {
+      console.error('Failed to load remote resources:', error);
+      // Continue with empty results on error
+      this.results = [];
+      this._update();
+    }
+  }
+
   public dispose() {
     DiscoverPanelProvider.currentPanel = undefined;
 
@@ -177,14 +191,13 @@ export class DiscoverPanelProvider {
 
     const resultsHtml = this.results.length === 0 ? `
       <div class="empty">
-        ${this.lastQuery ? 'No results found. Try a different search term.' : 'Enter a search term to discover remote AI resources.'}
+        ${this.lastQuery ? `No results found for "${this.lastQuery}". Try a different search term.` : 'Loading remote AI resources...'}
       </div>
     ` : this.results.map(r => `
       <div class="result" data-id="${escape(r.id)}">
         <div class="title">${escape(r.label)}</div>
         ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
         <div class="actions">
-          <button data-action="preview" data-id="${escape(r.id)}">Preview</button>
           <button data-action="activate" data-id="${escape(r.id)}">Pull to Workspace</button>
         </div>
       </div>
@@ -379,7 +392,7 @@ export class DiscoverPanelProvider {
 <body>
     <div class="header">
         <h1>Discover AI Resources</h1>
-        <p>Search and discover remote AI resources like prompts, instructions, and presets from the community.</p>
+        <p>Browse and search remote AI resources like prompts, instructions, and presets from the community. Resources are automatically loaded below.</p>
     </div>
     
     ${repoStatus}
@@ -388,9 +401,6 @@ export class DiscoverPanelProvider {
         <div class="search-row">
             <input id="discoverSearch" type="text" placeholder="Search for AI resources, hats, prompts..." value="${escape(this.lastQuery)}" />
             <button id="searchBtn">Search</button>
-        </div>
-        <div class="search-row">
-            <button id="beginBtn">Begin Discovery</button>
         </div>
     </div>
     
@@ -403,7 +413,6 @@ export class DiscoverPanelProvider {
         const vscode = acquireVsCodeApi();
         const searchInput = document.getElementById('discoverSearch');
         const searchBtn = document.getElementById('searchBtn');
-        const beginBtn = document.getElementById('beginBtn');
         
         function doSearch() {
             const query = searchInput.value.trim();
@@ -415,10 +424,6 @@ export class DiscoverPanelProvider {
             if (e.key === 'Enter') {
                 doSearch();
             }
-        });
-        
-        beginBtn.addEventListener('click', () => {
-            vscode.postMessage({ type: 'discover.begin' });
         });
         
         document.getElementById('results').addEventListener('click', e => {

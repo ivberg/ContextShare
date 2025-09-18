@@ -42,9 +42,14 @@ export class RemoteHatService {
 
   async queryHats(query: string): Promise<RemoteHatSummary[]> {
     const q = (query || '').trim().toLowerCase();
-    if(!q) return [];
-    
     const hats = await this.loadHats();
+    
+    if (!q) {
+      // Return all hats when no query is provided
+      await logger.info(`RemoteHatService.queryHats no query -> ${hats.length} total hats`);
+      return hats;
+    }
+    
     const res = hats.filter((h: RemoteHatSummary) =>
       h.name.toLowerCase().includes(q) ||
       (h.description || '').toLowerCase().includes(q) ||
