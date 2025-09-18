@@ -59,7 +59,7 @@ export class LocalRepoService {
       name: 'Local Repository',
       rootPath: localPath,
       catalogPath: path.join(localPath, 'catalog'),
-      runtimePath: path.join(localPath, 'runtime'),
+      runtimePath: '', // Local repo doesn't have runtime - that's workspace-specific
       isActive: true
     };
   }
@@ -69,13 +69,6 @@ export class LocalRepoService {
    */
   getLocalHatsPath(): string {
     return path.join(this.getLocalRepoPath(), 'catalog', 'hats');
-  }
-
-  /**
-   * Get the path for runtime resources (.github equivalent).
-   */
-  getLocalRuntimePath(): string {
-    return path.join(this.getLocalRepoPath(), 'runtime');
   }
 
   /**
@@ -117,13 +110,6 @@ export class LocalRepoService {
     return path.join(this.getLocalRepoPath(), 'catalog', category);
   }
 
-  /**
-   * Get the path for a specific resource category in the runtime.
-   */
-  getRuntimeResourcePath(category: string): string {
-    return path.join(this.getLocalRepoPath(), 'runtime', category);
-  }
-
   private getAppDataPath(): string {
     switch (process.platform) {
       case 'win32':
@@ -141,27 +127,16 @@ export class LocalRepoService {
   private async initializeRepoStructure(): Promise<void> {
     if (!this._localRepoPath) return;
 
-    // Create the standard catalog structure
+    // Create the catalog structure only - no runtime needed in local repo
     const catalogPath = path.join(this._localRepoPath, 'catalog');
-    const runtimePath = path.join(this._localRepoPath, 'runtime');
     
     await this.fileService.ensureDirectory(catalogPath);
-    await this.fileService.ensureDirectory(runtimePath);
     
-    // Create category directories in catalog
+    // Create category directories in catalog for storing pulled resources
     const categories = ['hats', 'chatmodes', 'instructions', 'prompts', 'tasks', 'mcp'];
     for (const category of categories) {
       await this.fileService.ensureDirectory(path.join(catalogPath, category));
     }
-
-    // Create runtime category directories 
-    const runtimeCategories = ['chatmodes', 'instructions', 'prompts', 'tasks'];
-    for (const category of runtimeCategories) {
-      await this.fileService.ensureDirectory(path.join(runtimePath, category));
-    }
-
-    // Create .vscode directory for MCP configs
-    await this.fileService.ensureDirectory(path.join(runtimePath, '.vscode'));
 
     // Create a README to document the purpose
     const readmePath = path.join(this._localRepoPath, 'README.md');
@@ -171,15 +146,13 @@ This directory contains locally managed AI resources that are separate from work
 
 ## Structure
 
-- \`catalog/\` - Local catalog resources (hats, templates, etc.)
+- \`catalog/\` - Local catalog resources pulled from remote sources
   - \`hats/\` - Hat definitions (presets that reference multiple resources)
   - \`chatmodes/\` - Chat mode configurations
   - \`instructions/\` - Instruction templates
   - \`prompts/\` - Prompt templates
   - \`tasks/\` - Task definitions
   - \`mcp/\` - Model Context Protocol configurations
-- \`runtime/\` - Active/applied resources (equivalent to .github in workspace)
-  - Resources are activated from catalog to runtime when applied
 
 ## Key Features
 
@@ -192,7 +165,10 @@ This directory contains locally managed AI resources that are separate from work
 
 1. **Discover**: Browse remote catalogs in the Discover panel
 2. **Pull**: Download hats and their resources to this local catalog
-3. **Apply**: Activate resources from local catalog to runtime for use
+3. **Apply**: Activate resources from local catalog to current workspace runtime (.github/)
+
+Note: This is a catalog-only repository. When you apply resources, they are copied to your 
+current workspace's runtime directory (typically .github/) where they become active.
 
 This location is managed by the ContextShare VS Code extension.
 
