@@ -110,6 +110,20 @@ export class LocalRepoService {
     }
   }
 
+  /**
+   * Get the path for a specific resource category in the catalog.
+   */
+  getCatalogResourcePath(category: string): string {
+    return path.join(this.getLocalRepoPath(), 'catalog', category);
+  }
+
+  /**
+   * Get the path for a specific resource category in the runtime.
+   */
+  getRuntimeResourcePath(category: string): string {
+    return path.join(this.getLocalRepoPath(), 'runtime', category);
+  }
+
   private getAppDataPath(): string {
     switch (process.platform) {
       case 'win32':
@@ -158,12 +172,29 @@ This directory contains locally managed AI resources that are separate from work
 ## Structure
 
 - \`catalog/\` - Local catalog resources (hats, templates, etc.)
+  - \`hats/\` - Hat definitions (presets that reference multiple resources)
+  - \`chatmodes/\` - Chat mode configurations
+  - \`instructions/\` - Instruction templates
+  - \`prompts/\` - Prompt templates
+  - \`tasks/\` - Task definitions
+  - \`mcp/\` - Model Context Protocol configurations
 - \`runtime/\` - Active/applied resources (equivalent to .github in workspace)
+  - Resources are activated from catalog to runtime when applied
 
-This location is managed by the ContextShare VS Code extension and provides a clean separation between:
-- Remote catalogs (discovered from URLs)
-- Workspace catalogs (in project repositories) 
-- Local resources (in this persistent app data location)
+## Key Features
+
+- **Persistent Storage**: Resources persist across workspace changes and VS Code sessions
+- **Clean Separation**: Completely isolated from workspace and VS Code user settings  
+- **Remote Integration**: Remote hats and resources can be pulled to this local repository
+- **Cross-Platform**: Uses appropriate app data directories for each operating system
+
+## Workflow
+
+1. **Discover**: Browse remote catalogs in the Discover panel
+2. **Pull**: Download hats and their resources to this local catalog
+3. **Apply**: Activate resources from local catalog to runtime for use
+
+This location is managed by the ContextShare VS Code extension.
 
 Created: ${new Date().toISOString()}
 `;

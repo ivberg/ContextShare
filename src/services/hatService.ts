@@ -57,6 +57,8 @@ export class HatService {
       while(seen.has(id)){ id = `${h.id}-${i++}`; }
       h.id = id; seen.add(id);
     }
+    
+    await logger.info(`[HatService] Discovered ${hats.length} local hats from ${localHatsDir}`);
     return hats;
   }
 

@@ -130,6 +130,78 @@ export class RemoteHatService {
     }
   }
 
+  /**
+   * Pull a hat and its resources to the local repository structure.
+   * Uses catalog/runtime structure instead of .github structure.
+   */
+  async pullHatToLocal(id: string, localRepoPath: string): Promise<boolean> {
+    try {
+      const hat = await this.getHat(id);
+      if (!hat) {
+        await logger.error(`Hat with id ${id} not found`);
+        return false;
+      }
+
+      // Create the hat JSON file in the catalog/hats directory
+      const hatFileName = `${hat.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.json`;
+      const hatFilePath = path.join(localRepoPath, 'catalog', 'hats', hatFileName);
+      
+      // Ensure the hats directory exists
+      const hatsDir = path.dirname(hatFilePath);
+      if (!fs.existsSync(hatsDir)) {
+        fs.mkdirSync(hatsDir, { recursive: true });
+      }
+
+      // Create hat content with collected resources
+      const collectedResources: string[] = [];
+      
+      // Copy each resource from remote to local catalog structure
+      for (const resourcePath of hat.resources) {
+        const remoteResourcePath = path.join(this.remoteStoreBasePath, resourcePath);
+        
+        if (fs.existsSync(remoteResourcePath)) {
+          // Place resources in catalog directory (not runtime)
+          const targetResourcePath = path.join(localRepoPath, 'catalog', resourcePath);
+          const targetResourceDir = path.dirname(targetResourcePath);
+          
+          // Ensure target directory exists
+          if (!fs.existsSync(targetResourceDir)) {
+            fs.mkdirSync(targetResourceDir, { recursive: true });
+          }
+          
+          // Copy the resource file
+          fs.copyFileSync(remoteResourcePath, targetResourcePath);
+          collectedResources.push(resourcePath);
+          await logger.info(`Copied resource to local catalog: ${resourcePath}`);
+        } else {
+          await logger.warn(`Resource not found: ${remoteResourcePath}`);
+        }
+      }
+
+      // Create the hat file with metadata and resource list
+      const hatContent = {
+        name: hat.name,
+        description: hat.description,
+        resources: collectedResources,
+        // Store metadata about the remote source
+        _metadata: {
+          remoteId: hat.id,
+          author: hat.author,
+          rating: hat.rating,
+          pulledAt: new Date().toISOString()
+        }
+      };
+
+      fs.writeFileSync(hatFilePath, JSON.stringify(hatContent, null, 2), 'utf8');
+      await logger.info(`Created local hat file: ${hatFilePath} with ${collectedResources.length} resources`);
+      
+      return true;
+    } catch (error) {
+      await logger.error(`Failed to pull hat ${id} to local repository: ${error}`);
+      return false;
+    }
+  }
+
   clearCache(): void {
     this.hatsCache = null;
   }

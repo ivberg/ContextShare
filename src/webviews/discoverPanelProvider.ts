@@ -249,22 +249,18 @@ export class DiscoverPanelProvider {
         return;
       }
 
-      // Save the hat to the local repository instead of workspace
-      // Convert RemoteHatSummary to Hat format
-      const localHat = {
-        id: `local:${hat.name}`,
-        name: hat.name,
-        description: hat.description,
-        resources: hat.resources,
-        source: 'catalog' as const
-      };
-      await this.hatService.saveHatToLocal(localHat);
+      // Use the new pullHatToLocal method that handles the local repository structure correctly
+      const success = await this.remoteHatService.pullHatToLocal(id, this.localRepo.rootPath);
 
-      vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to local repository.`);
-      
-      // Refresh both remote and local results to update status
-      await this.loadAllRemoteResources();
-      await this.loadAllLocalResources();
+      if (success) {
+        vscode.window.showInformationMessage(`Successfully pulled hat "${hat.name}" with ${hat.resources.length} resources to local repository.`);
+        
+        // Refresh both remote and local results to update status
+        await this.loadAllRemoteResources();
+        await this.loadAllLocalResources();
+      } else {
+        vscode.window.showErrorMessage(`Failed to pull hat "${hat.name}". Check that remote resources exist.`);
+      }
       
     } catch (e: any) {
       vscode.window.showErrorMessage('Failed to pull hat: ' + (e?.message || e));
