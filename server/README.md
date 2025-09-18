@@ -35,7 +35,7 @@ npm run build
 npm start
 ```
 
-### Database Mode (with Admin API)
+### Database Mode (with Admin API and Web Interface)
 ```powershell
 # PowerShell  
 cd server
@@ -43,9 +43,15 @@ $env:MODE = "database"
 $env:DATABASE_PATH = "./catalog.db"
 npm run build
 npm start
+
+# In a new terminal, start the web admin
+cd server/web-admin
+npm install
+npm run dev
 ```
 
 Visit the [Admin API Documentation](./ADMIN_API.md) for complete API reference and examples.
+Visit the [Web Admin Interface](http://localhost:3001) for the graphical management interface.
 
 ## Server Modes
 
@@ -145,6 +151,28 @@ curl -X POST http://localhost:3000/admin/resources \
   -H "Content-Type: application/json" \
   -d '{"catalogId": 1, "category": "instructions", "filename": "test.instructions.md", "content": "# Test\nContent here"}'
 ```
+
+### Web Admin Interface
+
+A modern Next.js web admin interface is available for managing catalogs and resources:
+
+```bash
+# Start the web admin (after starting the server)
+cd server/web-admin
+npm install
+npm run dev
+```
+
+The web admin will be available at `http://localhost:3001` and connects to the server API.
+
+**Features:**
+- Dashboard with server health monitoring
+- Catalog management (create, view, organize)
+- Resource management with Monaco code editor
+- Real-time API integration
+- Responsive design with Tailwind CSS
+
+See [Web Admin Documentation](./web-admin/README.md) for detailed setup and usage instructions.
 
 ## Migration from File to Database
 

@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
 import * as _path from 'path';
 import * as _fs from 'fs/promises';
 import { logger } from '../logging/logger';
@@ -75,6 +76,14 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
   const { config } = opts;
   const app = express();
   
+  // Enable CORS for web admin interface
+  app.use(cors({
+    origin: ['http://localhost:3001', 'http://127.0.0.1:3001'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  }));
+  
   // Create provider based on config mode if not provided
   let provider: CatalogProvider;
   if (opts.provider) {
@@ -146,8 +155,8 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
       else if(err.name === 'ZodError' || err.issues){ 
         code = 'validation_error'; 
         status = 400; 
-        logger.error({ err: JSON.stringify(err.issues || err.errors), code });
-        return res.status(status).json({ error: code, details: err.issues || err.errors });
+        logger.error({ err: JSON.stringify(err.issues ?? err.errors), code });
+        return res.status(status).json({ error: code, details: err.issues ?? err.errors });
       }
     }
     logger.error({ err: String(err?.message ?? err), code });

@@ -34,7 +34,7 @@ export class SqliteDatabaseService implements DatabaseService {
       const BetterSqlite3 = require('better-sqlite3');
       
       this.sqliteDb = new BetterSqlite3(this.config.filename, {
-        readonly: this.config.readonly || false,
+        readonly: this.config.readonly ?? false,
         verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
       });
 

@@ -35,7 +35,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
   const db = dbService.getKysely();
 
   // Helper function to invalidate cache for a category
-  const invalidateCache = (category: string) => {
+  const invalidateCache = (category: string): void => {
     if (indexCache) {
       const cacheKey = `idx:${category}`;
       indexCache.delete(cacheKey);
