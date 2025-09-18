@@ -14,7 +14,7 @@ import { CategoryTreeProvider } from './tree/categoryTreeProvider';
 import { OptionsTreeProvider } from './tree/optionsTreeProvider';
 import { OverviewTreeProvider } from './tree/overviewTreeProvider';
 // Discover moved to webview provider implementation
-import { DiscoverWebviewProvider } from './webviews/discoverWebviewProvider';
+import { DiscoverPanelProvider } from './webviews/discoverPanelProvider';
 import { RemoteHatService } from './services/remoteHatService';
 import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
@@ -139,7 +139,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		const overviewTree = new OverviewTreeProvider();
 		const remoteHatService = new RemoteHatService();
 		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
-		const discoverProvider = new DiscoverWebviewProvider(context, hatService, remoteHatService);
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
@@ -409,8 +408,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			tasksTree.setRepository(currentRepo, filteredResources);
 			mcpTree.setRepository(currentRepo, filteredResources);
 			// optionsTree has no resource dependency
-			// keep the webview provider aware of the current repository context
-			discoverProvider.setRepository(currentRepo);
 			
 			// Set context for showing/hiding views
 			const hasResources = filteredResources.length > 0;
@@ -537,7 +534,6 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			}),
 			vscode.window.registerTreeDataProvider('copilotCatalogOverview', overviewTree),
-			vscode.window.registerWebviewViewProvider(DiscoverWebviewProvider.viewType, discoverProvider),
 			vscode.window.registerTreeDataProvider('copilotCatalogChatmodes', chatmodesTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogInstructions', instructionsTree),
 			vscode.window.registerTreeDataProvider('copilotCatalogPrompts', promptsTree),
@@ -549,6 +545,9 @@ export async function activate(context: vscode.ExtensionContext) {
 				resourceService.clearRemoteCache();
 				vscode.window.showInformationMessage('Remote cache cleared');
 				logger.info('Remote cache cleared via command');
+			}),
+			vscode.commands.registerCommand('copilotCatalog.openDiscoverPanel', async () => {
+				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo);
 			}),
 			vscode.commands.registerCommand('copilotCatalog.openResource', async (item: any) => {
 				const res = pickResourceFromItem(item);
@@ -1107,12 +1106,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage('Discovery starting… (placeholder)');
 			}),
 			vscode.commands.registerCommand('copilotCatalog.discover.search', async () => {
-				// For programmatic invocation (not from webview) - prompt then update webview
-				const query = await vscode.window.showInputBox({ prompt: 'Search shared Hats', placeHolder: 'Type keywords' });
-				if(query === undefined) return;
-				await logger.info('Discover search query=' + query);
-				const remote = await remoteHatService.queryHats(query);
-				discoverProvider.setResults(query, remote.map(r=> ({ id: r.id, label: r.name, description: r.description })));
+				// Open the discover panel for interactive searching
+				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo);
 			}),
 			vscode.commands.registerCommand('copilotCatalog.addCatalogDirectory', async () => {
 				const cfg = vscode.workspace.getConfiguration();

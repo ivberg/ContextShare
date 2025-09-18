@@ -143,12 +143,6 @@
           "when": "copilotCatalog.hasResources"
         },
         {
-          "id": "copilotCatalogDiscover",
-          "name": "Discover",
-          "icon": "$(search)",
-          "type": "webview"
-        },
-        {
           "id": "copilotCatalogOptions",
           "name": "Options",
           "icon": "$(gear)"
@@ -171,6 +165,11 @@
         "command": "copilotCatalog.openSettings",
         "title": "ContextShare: Open Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "copilotCatalog.openDiscoverPanel",
+        "title": "ContextShare: Discover Resources",
+        "icon": "$(search)"
       },
       {
         "command": "copilotCatalog.activate",
