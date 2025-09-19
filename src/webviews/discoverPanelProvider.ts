@@ -423,23 +423,293 @@ export class DiscoverPanelProvider {
       const choice = await vscode.window.showInformationMessage(
         `Apply hat "${hat.name}" to user settings?`,
         { 
-          detail: `This will save the hat to your global user settings. Implementation coming soon!`,
+          detail: `This will copy ${hat.resources.length} resources to your VS Code user data directory. Tasks will be merged with your global tasks.json, other resources will be copied to appropriate user locations.`,
           modal: true 
         },
         'Apply to User', 'Cancel'
       );
       
-      if (choice === 'Apply to User') {
-        // TODO: Implement user hat application
-        // For now, just show a message that this is coming soon
-        vscode.window.showInformationMessage(`Hat "${hat.name}" user application coming soon!`);
-        
-        // Refresh the webview
-        this._update();
+      if (choice !== 'Apply to User') {
+        return;
       }
+
+      // Get VS Code user data path
+      const userDataPath = this.getVSCodeUserDataPath();
+      if (!userDataPath) {
+        vscode.window.showErrorMessage('Could not determine VS Code user data directory.');
+        return;
+      }
+
+      // Create a temporary "virtual" catalog repository pointing to the local repo
+      const virtualRepo = {
+        id: 'local-virtual',
+        name: 'Local Virtual',
+        rootPath: this.localRepo.rootPath,
+        catalogPath: path.join(this.localRepo.rootPath, 'catalog'),
+        runtimePath: path.join(this.localRepo.rootPath, '.github'),
+        isActive: true
+      };
+
+      // Import necessary modules
+      const { ResourceService } = await import('../services/resourceService');
+      const { FileService } = await import('../services/fileService');
+      const { ResourceCategory } = await import('../models');
+
+      // Create service instances
+      const fileService = new FileService();
+      const resourceService = new ResourceService(fileService);
+
+      // Discover resources from the local catalog
+      const allResources = await resourceService.discoverResources(virtualRepo);
+      
+      // Find resources that match the hat's resource list
+      const resourcesToApply = [];
+      const missingResources = [];
+
+      for (const relativePath of hat.resources) {
+        const normalizedPath = relativePath.replace(/\\/g, '/');
+        const resource = allResources.find(r => 
+          r.relativePath.replace(/\\/g, '/') === normalizedPath
+        );
+        
+        if (resource) {
+          resourcesToApply.push(resource);
+        } else {
+          missingResources.push(relativePath);
+        }
+      }
+
+      if (missingResources.length > 0) {
+        const shouldContinue = await vscode.window.showWarningMessage(
+          `Some resources from the hat were not found: ${missingResources.join(', ')}`,
+          { modal: true },
+          'Continue with Available Resources', 'Cancel'
+        );
+        
+        if (shouldContinue !== 'Continue with Available Resources') {
+          return;
+        }
+      }
+
+      // Apply the resources to user locations
+      let appliedCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      for (const resource of resourcesToApply) {
+        try {
+          const result = await this.applyResourceToUser(resource, userDataPath, fileService);
+          if (result.success) {
+            appliedCount++;
+          } else {
+            errorCount++;
+            errors.push(`${resource.relativePath}: ${result.message}`);
+          }
+        } catch (error: any) {
+          errorCount++;
+          errors.push(`${resource.relativePath}: ${error?.message || 'Unknown error'}`);
+        }
+      }
+
+      // Save the hat definition to user hats as well
+      try {
+        await this.hatService.saveHatToUser(hat);
+        vscode.window.showInformationMessage(`Hat "${hat.name}" definition saved to user settings.`);
+      } catch (error: any) {
+        errors.push(`Hat definition: ${error?.message || 'Failed to save hat definition'}`);
+        errorCount++;
+      }
+
+      // Show results
+      if (errorCount === 0) {
+        vscode.window.showInformationMessage(
+          `Successfully applied hat "${hat.name}" to user settings! Applied ${appliedCount} resources.`
+        );
+      } else {
+        const message = `Applied hat "${hat.name}" to user settings with some issues. Applied: ${appliedCount}, Failed: ${errorCount}`;
+        if (errors.length > 0) {
+          console.error('Hat user application errors:', errors);
+        }
+        vscode.window.showWarningMessage(message);
+      }
+      
+      // Refresh the webview
+      this._update();
       
     } catch (e: any) {
       vscode.window.showErrorMessage('Failed to apply hat to user settings: ' + (e?.message || e));
+    }
+  }
+
+  private getVSCodeUserDataPath(): string {
+    // Get the VS Code user data directory for Windows
+    const os = require('os');
+    const homeDir = os.homedir();
+    return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
+  }
+
+  private async applyResourceToUser(resource: any, userDataPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const resourceCategory = resource.category || 'unknown';
+      let targetPath: string;
+
+      // Determine target path based on hat resource category
+      switch (resourceCategory) {
+        case 'tasks':
+          targetPath = path.join(userDataPath, 'tasks.json');
+          return await this.mergeTasksToUser(resource, targetPath, fileService);
+        
+        case 'prompts':
+        case 'instructions':
+        case 'chatmodes':
+          // These go to a custom copilot-catalog folder under user data
+          const customDir = path.join(userDataPath, 'copilot-catalog', resourceCategory);
+          const fileName = path.basename(resource.absolutePath);
+          targetPath = path.join(customDir, fileName);
+          break;
+        
+        case 'mcp':
+          // MCP configs go to user data directory
+          targetPath = path.join(userDataPath, 'mcp.json');
+          return await this.mergeMcpToUser(resource, targetPath, fileService);
+        
+        default:
+          return {
+            success: false,
+            message: `Unsupported resource category: ${resourceCategory}`
+          };
+      }
+
+      // For prompts, instructions, chatmodes - just copy the file
+      const targetDir = path.dirname(targetPath);
+      await fileService.ensureDirectory(targetDir);
+
+      const sourceContent = await fileService.readFile(resource.absolutePath);
+      await fileService.writeFile(targetPath, sourceContent);
+      
+      return {
+        success: true,
+        message: `Copied ${path.basename(resource.absolutePath)} to user ${resourceCategory}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to apply resource: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  private async mergeTasksToUser(resource: any, targetPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      // Read source tasks
+      const sourceContent = await fileService.readFile(resource.absolutePath);
+      let sourceJson: any;
+      
+      try {
+        sourceJson = JSON.parse(sourceContent);
+      } catch (error) {
+        return {
+          success: false,
+          message: `Invalid JSON in tasks file: ${path.basename(resource.absolutePath)}`
+        };
+      }
+
+      let targetJson: any = { tasks: [] };
+      
+      // Read existing user tasks if they exist
+      if (await fileService.pathExists(targetPath)) {
+        try {
+          const targetContent = await fileService.readFile(targetPath);
+          targetJson = JSON.parse(targetContent);
+          if (!targetJson.tasks) targetJson.tasks = [];
+        } catch (error) {
+          console.warn(`Corrupted user tasks file, starting fresh`);
+          targetJson = { tasks: [] };
+        }
+      }
+
+      // Merge tasks
+      if (sourceJson.tasks && Array.isArray(sourceJson.tasks)) {
+        for (const task of sourceJson.tasks) {
+          // Check if task already exists (by label)
+          const existingIndex = targetJson.tasks.findIndex((t: any) => t.label === task.label);
+          if (existingIndex >= 0) {
+            // Replace existing task
+            targetJson.tasks[existingIndex] = task;
+          } else {
+            // Add new task
+            targetJson.tasks.push(task);
+          }
+        }
+      }
+
+      // Ensure target directory exists
+      await fileService.ensureDirectory(path.dirname(targetPath));
+      
+      // Write merged tasks
+      await fileService.writeFile(targetPath, JSON.stringify(targetJson, null, 2));
+      
+      return {
+        success: true,
+        message: `Merged tasks into user tasks.json`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to merge tasks: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  private async mergeMcpToUser(resource: any, targetPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      // Read source MCP config
+      const sourceContent = await fileService.readFile(resource.absolutePath);
+      let sourceJson: any;
+      
+      try {
+        sourceJson = JSON.parse(sourceContent);
+      } catch (error) {
+        return {
+          success: false,
+          message: `Invalid JSON in MCP file: ${path.basename(resource.path)}`
+        };
+      }
+
+      let targetJson: any = { mcpServers: {} };
+      
+      // Read existing user MCP config if it exists
+      if (await fileService.pathExists(targetPath)) {
+        try {
+          const targetContent = await fileService.readFile(targetPath);
+          targetJson = JSON.parse(targetContent);
+          if (!targetJson.mcpServers) targetJson.mcpServers = {};
+        } catch (error) {
+          console.warn(`Corrupted user MCP file, starting fresh`);
+          targetJson = { mcpServers: {} };
+        }
+      }
+
+      // Merge MCP servers
+      if (sourceJson.mcpServers) {
+        Object.assign(targetJson.mcpServers, sourceJson.mcpServers);
+      }
+
+      // Ensure target directory exists
+      await fileService.ensureDirectory(path.dirname(targetPath));
+      
+      // Write merged MCP config
+      await fileService.writeFile(targetPath, JSON.stringify(targetJson, null, 2));
+      
+      return {
+        success: true,
+        message: `Merged MCP servers into user config`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to merge MCP config: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
     }
   }
 
