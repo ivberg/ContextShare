@@ -58,9 +58,8 @@ class CatalogResourceAnalyzer {
                 };
             }
 
-            const metadata = analyzeContent(content, filename, type);
             const contentUrl = transformToGitHubUrl(filePath, repoConfig);
-            const apiPayload = generateApiPayload(metadata, contentUrl, this.config.catalogId);
+            // Content analysis will be done by LLM, not automated
 
             return {
                 success: true,
@@ -102,8 +101,8 @@ class CatalogResourceAnalyzer {
                 };
             }
 
-            const metadata = analyzeContent(content, filename, type);
-            const apiPayload = generateApiPayload(metadata, contentUrl, this.config.catalogId);
+            // Content analysis will be done by LLM, not automated
+            const apiPayload = { needsLLMAnalysis: true, contentUrl };
 
             return {
                 success: true,
@@ -253,7 +252,7 @@ const DEFAULT_CONFIG = {
     apiKey: process.env.CONTEXTSHARE_API_KEY || '',
     catalogId: 1,
     approvalMode: 'manual', // 'manual', 'auto', 'dry-run'
-    batchSize: 10,
+    batchSize: Infinity, // Process all files by default
     logLevel: 'info' // 'debug', 'info', 'warn', 'error'
 };
 
@@ -390,12 +389,11 @@ function getResourceExtension(filename) {
     return null;
 }
 /**
- * Transform local file path to GitHub URL
- * Note: Server automatically transforms repository URLs to raw content URLs for optimal performance.
- * Scripts can provide blob URLs which will be automatically converted.
+ * Transform local file path to raw GitHub URL
+ * Generates raw.githubusercontent.com URLs for direct content access
  * @param {string} localPath - Local file path
  * @param {object} repoConfig - Repository configuration
- * @returns {string} GitHub URL
+ * @returns {string} Raw GitHub URL
  */
 function transformToGitHubUrl(localPath, repoConfig) {
     const {
@@ -409,13 +407,131 @@ function transformToGitHubUrl(localPath, repoConfig) {
     const normalizedLocal = localPath.replace(/\\/g, '/');
     const normalizedRoot = localRoot.replace(/\\/g, '/');
     
-    // Extract relative path from local root
-    const relativePath = normalizedLocal.replace(normalizedRoot, '').replace(/^\//, '');
+    // Extract relative path from local root - ensure we handle the root path correctly
+    let relativePath = normalizedLocal.replace(normalizedRoot, '');
     
-    // Construct GitHub URL
-    const githubUrl = `https://github.com/${owner}/${repo}/blob/${branch}/${relativePath}`;
+    // Remove leading slash if present
+    relativePath = relativePath.replace(/^\/+/, '');
+    
+    // Construct raw GitHub URL (not blob URL)
+    const githubUrl = `https://raw.githubusercontent.com/${owner}/${repo}/refs/heads/${branch}/${relativePath}`;
     
     return githubUrl;
+}
+
+/**
+ * Fetch all existing resources from database once for efficient lookup
+ * @returns {Promise<Set<string>>} Set of existing filenames and URLs
+ */
+async function fetchAllExistingResources() {
+    try {
+        const { execSync } = require('child_process');
+        const path = require('path');
+        
+        console.log(`🔍 Fetching all existing resources from database...`);
+        
+        // Get all filenames and URLs in one query
+        const query = `SELECT filename, content_url FROM resources`;
+        
+        const result = execSync(
+            `npx tsx src/tools/db-query.ts "${query}"`,
+            { 
+                cwd: path.join(__dirname, '..'),
+                encoding: 'utf8',
+                stdio: 'pipe'
+            }
+        );
+        
+        const existingResources = new Set();
+        
+        // Parse the output to extract filenames and URLs
+        const lines = result.split('\n');
+        for (const line of lines) {
+            // Look for lines that contain actual data (not headers or separators)
+            if (line.includes('│') && !line.includes('(index)') && !line.includes('├─') && !line.includes('└─')) {
+                // Extract filename and URL from table format
+                const parts = line.split('│').map(part => part.trim()).filter(part => part);
+                if (parts.length >= 3) {
+                    const filename = parts[1]?.replace(/'/g, ''); // Column 1 is filename
+                    const contentUrl = parts[2]?.replace(/'/g, ''); // Column 2 is content_url
+                    
+                    if (filename && filename !== 'filename') existingResources.add(filename);
+                    if (contentUrl && contentUrl !== 'content_url') existingResources.add(contentUrl);
+                }
+            }
+        }
+        
+        console.log(`📊 Found ${existingResources.size} existing resource identifiers in database`);
+        return existingResources;
+        
+    } catch (error) {
+        console.warn(`⚠️ Failed to fetch existing resources:`, error.message);
+        return new Set(); // Return empty set if query fails
+    }
+}
+
+/**
+ * Check if a resource exists using pre-fetched lookup table
+ * @param {Set<string>} existingResources - Pre-fetched set of existing resources
+ * @param {string} contentUrl - The content URL to check
+ * @param {string} filename - Filename to check
+ * @returns {boolean} True if resource exists
+ */
+function checkResourceExistsInLookup(existingResources, contentUrl, filename) {
+    const exists = existingResources.has(filename) || existingResources.has(contentUrl);
+    
+    if (exists) {
+        console.log(`✅ Resource found: ${filename}`);
+    } else {
+        console.log(`❌ Resource not found: ${filename}`);
+    }
+    
+    return exists;
+}
+
+/**
+ * Check if resource already exists in database using direct query (legacy - use lookup table instead)
+ * @param {string} contentUrl - GitHub URL to check
+ * @param {string} filename - Filename to check
+ * @returns {Promise<boolean>} True if resource exists
+ */
+async function checkResourceExistsInDB(contentUrl, filename) {
+    try {
+        const { execSync } = require('child_process');
+        const path = require('path');
+        
+        // Simple filename-based check first (most reliable)
+        const query = `SELECT filename FROM resources WHERE filename = '${filename}' LIMIT 1`;
+        const dbPath = path.join(__dirname, '..', 'catalog.db');
+        
+        console.log(`🔍 Checking database for: ${filename}`);
+        
+        // Execute the query
+        const result = execSync(
+            `npx tsx src/tools/db-query.ts "${query}"`,
+            { 
+                cwd: path.join(__dirname, '..'),
+                encoding: 'utf8',
+                stdio: 'pipe'
+            }
+        );
+        
+        // Check if result contains the filename (meaning it was found)
+        const exists = result.includes(filename);
+        
+        if (exists) {
+            console.log(`✅ Found existing resource: ${filename}`);
+        } else {
+            console.log(`❌ Resource not found: ${filename}`);
+        }
+        
+        return exists;
+        
+    } catch (error) {
+        // If database check fails, assume doesn't exist to avoid blocking processing
+        console.warn(`⚠️ Database check failed for ${filename}: ${error.message}`);
+        return false;
+    }
 }
 
 /**
@@ -511,171 +627,7 @@ async function submitResource(serverUrl, apiKey, payload) {
     });
 }
 
-/**
- * Analyze resource content and extract metadata
- * @param {string} content - File content
- * @param {string} filename - Original filename
- * @param {string} type - Resource type
- * @returns {object} Extracted metadata
- */
-function analyzeContent(content, filename, type) {
-    const lines = content.split('\n');
-    let title = null;
-    let description = null;
-    
-    // Extract title from first heading
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    if (titleMatch) {
-        title = titleMatch[1].trim();
-    }
-    
-    // Extract description from content after title
-    let descriptionLines = [];
-    let inDescription = false;
-    let headingCount = 0;
-    
-    for (const line of lines) {
-        const trimmed = line.trim();
-        
-        // Skip comments and metadata
-        if (trimmed.startsWith('<!--') || trimmed.startsWith('```')) {
-            continue;
-        }
-        
-        // Track headings
-        if (trimmed.startsWith('#')) {
-            headingCount++;
-            if (headingCount === 1) {
-                inDescription = true;
-                continue;
-            } else {
-                break; // Stop at second heading
-            }
-        }
-        
-        // Collect description lines
-        if (inDescription && trimmed && !trimmed.startsWith('#')) {
-            descriptionLines.push(trimmed);
-        }
-        
-        // Stop if we have enough description
-        if (descriptionLines.length >= 5) {
-            break;
-        }
-    }
-    
-    description = descriptionLines.join(' ').substring(0, 300).trim();
-    
-    // Analyze content for category and tags
-    const contentLower = content.toLowerCase();
-    let category = getDefaultCategory(type);
-    let tags = [type];
-    
-    // Technology detection
-    const techPatterns = {
-        'web-development': ['react', 'vue', 'angular', 'frontend', 'javascript', 'typescript', 'html', 'css'],
-        'cloud': ['azure', 'aws', 'gcp', 'cloud', 'serverless', 'kubernetes', 'docker'],
-        'database': ['sql', 'mongodb', 'postgresql', 'mysql', 'database', 'orm'],
-        'mobile': ['ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
-        'backend': ['api', 'server', 'node.js', 'express', 'microservice'],
-        'devops': ['ci/cd', 'pipeline', 'deployment', 'jenkins', 'github actions'],
-        'security': ['auth', 'security', 'encryption', 'oauth', 'jwt'],
-        'testing': ['test', 'unit test', 'integration', 'jest', 'mocha'],
-        'python': ['python', 'django', 'flask', 'pandas', 'numpy'],
-        'dotnet': ['c#', '.net', 'asp.net', 'blazor', 'entity framework'],
-        'java': ['java', 'spring', 'maven', 'gradle'],
-        'rust': ['rust', 'cargo', 'wasm'],
-        'go': ['golang', 'go ', 'gin', 'gorilla']
-    };
-    
-    for (const [cat, patterns] of Object.entries(techPatterns)) {
-        if (patterns.some(pattern => contentLower.includes(pattern))) {
-            category = cat;
-            tags.push(...patterns.filter(p => contentLower.includes(p)));
-            break;
-        }
-    }
-    
-    // Skill level detection
-    if (contentLower.includes('beginner') || contentLower.includes('basic') || contentLower.includes('intro')) {
-        tags.push('beginner');
-    } else if (contentLower.includes('advanced') || contentLower.includes('expert')) {
-        tags.push('advanced');
-    } else if (contentLower.includes('intermediate')) {
-        tags.push('intermediate');
-    }
-    
-    // Purpose detection
-    const purposePatterns = {
-        'debugging': ['debug', 'troubleshoot', 'error', 'bug'],
-        'architecture': ['architecture', 'design', 'pattern'],
-        'performance': ['performance', 'optimization', 'speed'],
-        'security': ['security', 'auth', 'permission'],
-        'automation': ['automation', 'script', 'ci/cd'],
-        'documentation': ['documentation', 'doc', 'guide'],
-        'tutorial': ['tutorial', 'how-to', 'step-by-step']
-    };
-    
-    for (const [purpose, patterns] of Object.entries(purposePatterns)) {
-        if (patterns.some(pattern => contentLower.includes(pattern))) {
-            tags.push(purpose);
-        }
-    }
-    
-    // Remove duplicates and clean tags
-    tags = [...new Set(tags)].filter(tag => tag.length > 1);
-    
-    return {
-        type,
-        filename,
-        title,
-        description: description || null,
-        category,
-        tags: tags.join(',')
-    };
-}
-
-/**
- * Get default category for resource type
- * @param {string} type - Resource type
- * @returns {string} Default category
- */
-function getDefaultCategory(type) {
-    const defaults = {
-        'chatmodes': 'ai-ml',
-        'instructions': 'architecture',
-        'prompts': 'ai-ml',
-        'tasks': 'automation',
-        'mcp': 'ai-ml'
-    };
-    return defaults[type] || 'other';
-}
-
-/**
- * Generate ContextShare API payload
- * @param {object} metadata - Extracted metadata
- * @param {string} contentUrl - GitHub URL
- * @param {number} catalogId - Target catalog ID
- * @returns {object} API payload
- */
-function generateApiPayload(metadata, contentUrl, catalogId) {
-    return {
-        catalogId,
-        type: metadata.type,
-        filename: metadata.filename,
-        title: metadata.title,
-        description: metadata.description,
-        category: metadata.category,
-        tags: metadata.tags,
-        contentUrl,
-        resourceType: 'url',
-        metadata: {
-            source: 'resource-processor',
-            processedAt: new Date().toISOString(),
-            version: '1.0.0'
-        }
-    };
-}
+// Content analysis and metadata generation removed - LLM will handle this
 
 /**
  * Interactive approval workflow
@@ -714,9 +666,10 @@ async function requestApproval(resourceData) {
  * @param {object} fileInfo - File information from discovery
  * @param {object} repoConfig - Repository configuration
  * @param {object} config - Processing configuration
+ * @param {Set<string>} existingResources - Pre-fetched lookup table of existing resources
  * @returns {Promise<object>} Processing result
  */
-async function processFile(fileInfo, repoConfig, config) {
+async function processFile(fileInfo, repoConfig, config, existingResources) {
     const logger = new Logger(config.logLevel);
     
     try {
@@ -726,65 +679,45 @@ async function processFile(fileInfo, repoConfig, config) {
         // Transform path to GitHub URL
         const contentUrl = transformToGitHubUrl(fileInfo.filePath, repoConfig);
         
-        // Check if resource already exists
-        if (config.apiKey) {
-            const exists = await checkResourceExists(config.serverUrl, config.apiKey, contentUrl);
-            if (exists) {
-                return {
-                    success: false,
-                    filePath: fileInfo.filePath,
-                    reason: 'Resource already exists in catalog',
-                    skipped: true
-                };
-            }
+        // Check if resource already exists using pre-fetched lookup table (much faster!)
+        const exists = checkResourceExistsInLookup(existingResources, contentUrl, fileInfo.filename);
+        if (exists) {
+            logger.info(`⏭️ SKIPPING: ${fileInfo.filename} (already exists in database)`);
+            return {
+                success: false,
+                filePath: fileInfo.filePath,
+                reason: 'Resource already exists in catalog',
+                skipped: true
+            };
         }
         
-        // Analyze content
-        const metadata = analyzeContent(content, fileInfo.filename, fileInfo.type);
-        
-        // Generate API payload
-        const apiPayload = generateApiPayload(metadata, contentUrl, config.catalogId);
-        
+        // Extract content for LLM analysis instead of automated analysis
         const result = {
             success: true,
             filePath: fileInfo.filePath,
+            filename: fileInfo.filename,
+            type: fileInfo.type,
             contentUrl,
-            metadata,
-            apiPayload,
-            contentPreview: content.substring(0, 200) + '...'
+            content: content,
+            contentPreview: content.substring(0, 500) + (content.length > 500 ? '...' : ''),
+            needsLLMAnalysis: true
         };
         
-        // Handle approval workflow
-        if (config.approvalMode === 'manual') {
-            const approved = await requestApproval(result);
-            if (!approved) {
-                return {
-                    success: false,
-                    filePath: fileInfo.filePath,
-                    reason: 'User rejected',
-                    skipped: true
-                };
-            }
+        // Save content to temporary file for LLM analysis
+        const tempDir = path.join(__dirname, 'temp-analysis');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
         }
         
-        // Submit to API if not dry-run
-        if (config.approvalMode !== 'dry-run' && config.apiKey) {
-            try {
-                const apiResponse = await submitResource(config.serverUrl, config.apiKey, apiPayload);
-                result.apiResponse = apiResponse;
-                result.submitted = true;
-                logger.success(`✅ Submitted: ${fileInfo.filename}`);
-            } catch (error) {
-                result.success = false;
-                result.error = `API submission failed: ${error.message}`;
-                logger.error(`❌ API Error for ${fileInfo.filename}: ${error.message}`);
-            }
-        } else {
-            result.submitted = false;
-            if (config.approvalMode === 'dry-run') {
-                logger.info(`🔍 Dry-run: ${fileInfo.filename} (would be submitted)`);
-            }
-        }
+        const tempFile = path.join(tempDir, `${fileInfo.filename}`);
+        fs.writeFileSync(tempFile, content, 'utf8');
+        
+        // No approval or database insertion - LLM will handle this
+        result.tempFile = tempFile;
+        result.submitted = false;
+        result.awaitingLLMAnalysis = true;
+        
+        logger.info(`📄 Content saved for LLM analysis: ${tempFile}`);
         
         return result;
         
@@ -831,23 +764,34 @@ async function processRepository(repositoryPath, options = {}) {
     
     logger.info(`📊 Found ${discoveredFiles.length} files:`, byType);
     
-    // Process files in batches
+    // 🚀 OPTIMIZATION: Fetch all existing resources ONCE for efficient lookup
+    logger.info(`\n🔍 Fetching existing resources for efficient duplicate detection...`);
+    const existingResources = await fetchAllExistingResources();
+    
+    // Process files in batches - process until we have batchSize new files (excluding skips)
     const results = [];
     const batchSize = config.batchSize;
+    let processedCount = 0;
+    let currentIndex = 0;
     
-    for (let i = 0; i < discoveredFiles.length; i += batchSize) {
-        const batch = discoveredFiles.slice(i, i + batchSize);
-        logger.info(`\n📦 Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(discoveredFiles.length/batchSize)}`);
+    logger.info(`\n📦 Processing batch to get ${batchSize} new files`);
+    logger.info(`📊 Total files to scan: ${discoveredFiles.length}`);
+    
+    // Process files sequentially until we have enough new ones or run out of files
+    while (processedCount < batchSize && currentIndex < discoveredFiles.length) {
+        const file = discoveredFiles[currentIndex];
+        const result = await processFile(file, repoConfig, config, existingResources);
+        results.push(result);
         
-        const batchPromises = batch.map(file => processFile(file, repoConfig, config));
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults);
-        
-        // Brief pause between batches to avoid overwhelming the API
-        if (i + batchSize < discoveredFiles.length) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        // Only count non-skipped files toward our batch size
+        if (!result.skipped) {
+            processedCount++;
         }
+        currentIndex++;
     }
+    
+    logger.info(`📊 Scanned ${currentIndex} files, processed ${processedCount} new files`);
+    logger.info(`📊 Remaining files: ${discoveredFiles.length - currentIndex}`);
     
     // Generate summary
     const successful = results.filter(r => r.success && r.submitted);
@@ -895,8 +839,6 @@ module.exports = {
     
     // Individual functions for direct use
     transformToGitHubUrl,
-    analyzeContent,
-    generateApiPayload,
     processFile,
     processRepository,
     discoverResourceFiles,
@@ -907,16 +849,10 @@ module.exports = {
     // Utility functions
     createAnalyzer: (config = {}) => new CatalogResourceAnalyzer(config),
     
-    // Quick analysis function for LLMs
+    // Quick analysis function for LLMs - saves content for LLM analysis
     quickAnalyze: async (filePath, repoConfig = null) => {
         const analyzer = new CatalogResourceAnalyzer();
         return await analyzer.analyzeFile(filePath, repoConfig);
-    },
-    
-    // Analyze content without file system access
-    analyzeContentDirect: (content, filename, contentUrl, config = {}) => {
-        const analyzer = new CatalogResourceAnalyzer(config);
-        return analyzer.analyzeContent(content, filename, contentUrl);
     }
 };
 
@@ -942,7 +878,7 @@ Options:
   --owner <owner>          Override GitHub repository owner
   --repo <repo>            Override GitHub repository name  
   --branch <branch>        Override GitHub branch (default: main)
-  --batch-size <size>      Processing batch size (default: 10)
+  --batch-size <size>      Processing batch size (default: all files)
   --log-level <level>      Logging level: debug, info, warn, error (default: info)
   --help                   Show this help
 
