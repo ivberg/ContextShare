@@ -22,29 +22,39 @@ interface ResourceContentResponse {
 // Validation schemas
 const resourceTypeSchema = z.enum(['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp']);
 
+// Accept both 'type' (preferred) and legacy 'category' field pointing to resource type (instructions, prompts, etc.)
 const createResourceSchema = z.object({
   catalogId: z.number().int().positive(),
-  type: resourceTypeSchema,
+  type: resourceTypeSchema.optional(),
+  // legacy alias (tests used 'category' originally to mean resource type)
+  category: resourceTypeSchema.optional(),
   filename: z.string().min(1).max(255),
   title: z.string().optional(),
   description: z.string().optional(),
-  category: z.string().optional(), // Domain/technology category
-  tags: z.string().optional(), // Comma-separated tags
+  // domainCategory: domain classification separate from resource type (retain legacy naming confusion)
+  domainCategory: z.string().optional(),
+  tags: z.string().optional(),
   content: z.string().optional(),
   contentUrl: z.string().url().optional(),
   resourceType: z.enum(['content', 'url']).default('content'),
   metadata: z.record(z.any()).optional(),
 }).refine((data) => {
-  if (data.resourceType === 'content' && !data.content) {
-    return false;
-  }
-  if (data.resourceType === 'url' && !data.contentUrl) {
-    return false;
-  }
-  return true;
-}, {
-  message: "Content is required for content resources, contentUrl is required for URL resources"
-});
+  // Require at least one of type/category alias (strict comparison per lint)
+  return (data.type ?? data.category) !== null && (data.type ?? data.category) !== undefined;
+}, { message: 'type (or legacy category) is required' })
+  .refine((data) => {
+    if (data.resourceType === 'content' && !data.content) { return false; }
+    if (data.resourceType === 'url' && !data.contentUrl) { return false; }
+    return true;
+  }, { message: 'Content is required for content resources, contentUrl is required for URL resources' })
+  .transform((data) => {
+    const normalizedType = data.type ?? data.category; // guaranteed by refine above
+    return {
+      ...data,
+      type: normalizedType as typeof normalizedType & NonNullable<typeof normalizedType>,
+      category: data.domainCategory ?? undefined
+    };
+  });
 
 const updateResourceSchema = z.object({
   title: z.string().optional(),
@@ -186,16 +196,21 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
   // POST /admin/resources - Create new resource
   router.post('/resources', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = createResourceSchema.parse(req.body);
+  const data = createResourceSchema.parse(req.body);
       
       if (!catalogProvider.create) {
         return res.status(501).json({ error: 'Resource creation not supported in current mode' });
       }
 
+      if (!data.type) {
+        // Should be unreachable due to refine, but runtime guard for safety
+        return res.status(400).json({ error: 'Invalid resource type (missing after validation)' });
+      }
+      const resourceTypeId = data.type;
       if (data.resourceType === 'content') {
         await catalogProvider.create(
           data.catalogId,
-          data.type,
+          resourceTypeId,
           data.filename,
           data.content ?? '',
           data.metadata,
@@ -209,7 +224,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
       } else {
         await catalogProvider.create(
           data.catalogId,
-          data.type,
+          resourceTypeId,
           data.filename,
           undefined as never,
           data.metadata,
@@ -227,7 +242,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         .selectFrom('resources')
         .selectAll()
         .where('catalog_id', '=', data.catalogId)
-        .where('type', '=', data.type)
+        .where('type', '=', resourceTypeId)
         .where('filename', '=', data.filename)
         .executeTakeFirstOrThrow();
 
@@ -239,7 +254,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
       }, 'Resource created');
       
       // Invalidate index cache for this resource type
-      invalidateCache(data.type);
+  invalidateCache(resourceTypeId);
       
       res.status(201).json(resource);
     } catch (error) {
@@ -363,6 +378,140 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
       };
 
       res.json(response);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // GET /admin/catalog-export - Aggregate all catalogs with resources
+  // Simple, single call for clients needing full metadata dump.
+  // Simplified response shape (fields trimmed):
+  // {
+  //   generated_at: ISO8601,
+  //   catalogs: [{ name, display_name, description, source_type, source_path?, source_url?, created_at, updated_at, resources: { chatmodes: RS[], instructions: RS[], prompts: RS[], tasks: RS[], mcp: RS[] } }],
+  //   counts: { catalogs, resources }
+  // }
+  // RS (ResourceSummary): { filename, title?, description?, category?, tags?, content_type, resource_type, content_url?, metadata?, created_at, updated_at, content?, truncated?, size? }
+  router.get('/catalog-export', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      interface ResourceExportSummary {
+        filename: string;
+        title?: string;
+        description?: string;
+        category?: string;
+        tags?: string;
+        content_type: string;
+        resource_type: string;
+        content_url?: string;
+        metadata?: Record<string, unknown>;
+        created_at: Date;
+        updated_at: Date;
+        content?: string;
+        truncated?: boolean;
+        size?: number;
+      }
+      interface CatalogExport {
+        name: string;
+        display_name: string | null;
+        description: string | null;
+        source_type: string;
+        source_path?: string;
+        source_url?: string;
+        created_at: Date;
+        updated_at: Date;
+        resources: Record<'chatmodes'|'instructions'|'prompts'|'tasks'|'mcp', ResourceExportSummary[]>;
+      }
+      type CatalogMap = Record<number, CatalogExport>;
+      // Fetch all catalogs
+      const catalogs = await db
+        .selectFrom('catalogs')
+        .selectAll()
+  .where('enabled', '=', 1)
+        .execute();
+
+      if (catalogs.length === 0) {
+        return res.json({ generated_at: new Date().toISOString(), catalogs: [], counts: { catalogs: 0, resources: 0 } });
+      }
+
+      // Fetch all resources for these catalogs in one query
+      const catalogIds = catalogs.map(c => c.id);
+      const resources = await db
+        .selectFrom('resources')
+        .selectAll()
+  .where('catalog_id', 'in', catalogIds)
+  .where('enabled', '=', 1)
+        .execute();
+
+      // Size guard: limit to 10,000 resources to protect server memory
+      if (resources.length > 10_000) {
+        return res.status(413).json({ error: 'export_too_large', max: 10000 });
+      }
+
+      // Group resources by catalog and type
+  const byCatalog: CatalogMap = {};
+      for (const cat of catalogs) {
+        byCatalog[cat.id] = {
+          // id intentionally omitted for lightweight export
+          name: cat.name,
+          display_name: cat.display_name,
+          description: cat.description,
+          source_type: cat.source_type,
+          source_path: cat.source_path ?? undefined,
+          source_url: cat.source_url ?? undefined,
+          // enabled always filtered to 1 so omitted
+          created_at: cat.created_at,
+          updated_at: cat.updated_at,
+          resources: {
+            chatmodes: [],
+            instructions: [],
+            prompts: [],
+            tasks: [],
+            mcp: []
+          }
+        };
+      }
+
+      const INLINE_CONTENT_LIMIT = 50 * 1024; // 50KB to avoid huge payloads
+
+      for (const r of resources) {
+        const cat = byCatalog[r.catalog_id];
+        if (!cat) { continue; }
+        // Parse metadata JSON if present
+        let parsedMeta: Record<string, unknown> | null = null;
+        if (r.metadata) {
+          try { parsedMeta = JSON.parse(r.metadata); } catch { parsedMeta = null; }
+        }
+        const summary = {
+          // id, enabled, and type omitted for simplified payload (type implicit by grouping key)
+          filename: r.filename,
+          title: r.title ?? undefined,
+          description: r.description ?? undefined,
+          category: r.category ?? undefined,
+          tags: r.tags ?? undefined,
+          content_type: r.content_type,
+          resource_type: r.resource_type,
+          content_url: r.content_url ?? undefined,
+          metadata: parsedMeta ?? undefined,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+          content: (r.resource_type === 'content' && typeof r.content === 'string' && r.content.length <= INLINE_CONTENT_LIMIT) ? r.content : undefined,
+          truncated: (r.resource_type === 'content' && typeof r.content === 'string' && r.content.length > INLINE_CONTENT_LIMIT) ? true : undefined,
+          size: r.resource_type === 'content' ? (typeof r.content === 'string' ? r.content.length : undefined) : undefined
+        };
+    // Push into appropriate array (narrow key without assertion)
+    const key: keyof CatalogExport['resources'] = r.type;
+    cat.resources[key].push(summary);
+      }
+
+  const exportPayload: CatalogExport[] = Object.values(byCatalog);
+      const totalResources = resources.length;
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        generated_at: new Date().toISOString(),
+        catalogs: exportPayload,
+        counts: { catalogs: catalogs.length, resources: totalResources }
+      });
     } catch (error) {
       next(error);
     }
