@@ -391,6 +391,8 @@ function getResourceExtension(filename) {
 }
 /**
  * Transform local file path to GitHub URL
+ * Note: Server automatically transforms repository URLs to raw content URLs for optimal performance.
+ * Scripts can provide blob URLs which will be automatically converted.
  * @param {string} localPath - Local file path
  * @param {object} repoConfig - Repository configuration
  * @returns {string} GitHub URL

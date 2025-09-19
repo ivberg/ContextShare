@@ -94,20 +94,6 @@ const getLanguageForCategory = (category: ResourceType): string => {
   }
 };
 
-// Helper function to transform GitHub URLs to raw content URLs
-const transformGitHubUrl = (url: string): string => {
-  // Transform github.com/user/repo/blob/branch/path to raw.githubusercontent.com/user/repo/branch/path
-  const githubBlobRegex = /^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/;
-  const match = url.match(githubBlobRegex);
-  
-  if (match) {
-    const [, owner, repo, branch, path] = match;
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-  }
-  
-  return url; // Return original URL if no transformation needed
-};
-
 function NewResourceForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -262,8 +248,8 @@ function NewResourceForm() {
       if (formData.resourceType === 'content') {
         createRequest.content = formData.content;
       } else {
-        // Transform GitHub URLs to raw content URLs for better performance
-        createRequest.contentUrl = transformGitHubUrl(formData.contentUrl);
+        // Server automatically transforms repository URLs to raw content URLs
+        createRequest.contentUrl = formData.contentUrl;
       }
       
       if (parsedMetadata) {
@@ -447,7 +433,7 @@ function NewResourceForm() {
                 placeholder="https://github.com/github/awesome-copilot/blob/main/instructions/blazor.instructions.md"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Enter the URL to the external resource. GitHub URLs will be automatically converted to raw content URLs.
+                Enter the URL to the external resource. Repository URLs (GitHub, GitLab, Azure DevOps) will be automatically optimized.
               </p>
             </div>
           </div>

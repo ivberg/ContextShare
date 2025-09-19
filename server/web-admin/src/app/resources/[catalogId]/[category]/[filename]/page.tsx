@@ -393,7 +393,7 @@ export default function ResourceEditPage() {
                 placeholder="https://github.com/github/awesome-copilot/blob/main/instructions/blazor.instructions.md"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Enter the URL to the external resource. GitHub URLs will be automatically converted to raw content URLs.
+                Enter the URL to the external resource. Repository URLs (GitHub, GitLab, Azure DevOps) will be automatically optimized.
               </p>
               {contentUrl && (
                 <div className="mt-3">

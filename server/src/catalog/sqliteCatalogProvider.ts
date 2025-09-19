@@ -1,6 +1,7 @@
 import { CatalogProvider } from './types';
 import { DatabaseService } from '../database/service';
 import { logger } from '../logging/logger';
+import { transformToRawUrl } from '../utils/urlTransform';
 
 const MAX_FILE_BYTES = 1_000_000; // 1MB safety cap
 
@@ -132,6 +133,9 @@ export class SqliteCatalogProvider implements CatalogProvider {
       throw new Error('Content URL is required for URL-type resources');
     }
     
+    // Transform repository URLs to raw content URLs for better performance
+    const transformedContentUrl = contentUrl ? transformToRawUrl(contentUrl) : null;
+    
     await db
       .insertInto('resources')
       .values({
@@ -145,7 +149,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
         content: resourceType === 'content' ? (content ?? '') : '',
         content_type: contentType,
         resource_type: resourceType,
-        content_url: resourceType === 'url' ? (contentUrl ?? null) : null,
+        content_url: resourceType === 'url' ? transformedContentUrl : null,
         metadata: metadata ? JSON.stringify(metadata) : null,
         enabled: 1, // SQLite boolean as integer
       })
@@ -160,7 +164,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
       .selectFrom('resources')
       .select(['resource_type', 'content', 'content_url'])
       .where('catalog_id', '=', catalogId)
-      .where('category', '=', category as any)
+      .where('type', '=', category as any)
       .where('filename', '=', fileName)
       .executeTakeFirst();
     
@@ -182,6 +186,9 @@ export class SqliteCatalogProvider implements CatalogProvider {
       throw new Error('Content URL is required for URL-type resources');
     }
     
+    // Transform repository URLs to raw content URLs for better performance
+    const transformedContentUrl = contentUrl ? transformToRawUrl(contentUrl) : null;
+    
     const updateData: any = {
       title,
       metadata: metadata ? JSON.stringify(metadata) : null,
@@ -193,14 +200,14 @@ export class SqliteCatalogProvider implements CatalogProvider {
       updateData.content_url = null;
     } else {
       updateData.content = '';
-      updateData.content_url = contentUrl ?? null;
+      updateData.content_url = transformedContentUrl;
     }
     
     await db
       .updateTable('resources')
       .set(updateData)
       .where('catalog_id', '=', catalogId)
-      .where('category', '=', category as any)
+      .where('type', '=', category as any)
       .where('filename', '=', fileName)
       .execute();
   }
@@ -211,7 +218,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
     await db
       .deleteFrom('resources')
       .where('catalog_id', '=', catalogId)
-      .where('category', '=', category as any)
+      .where('type', '=', category as any)
       .where('filename', '=', fileName)
       .execute();
   }
