@@ -109,7 +109,8 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
           'catalogs.enabled',
           'catalogs.created_at',
           'catalogs.updated_at',
-          (eb): any => eb.fn.count('resources.id').as('resource_count')
+          // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+          (eb) => eb.fn.count('resources.id').as('resource_count')
         ])
         .groupBy(['catalogs.id'])
         .execute();

@@ -1,5 +1,6 @@
-import { Kysely, SqliteDialect, sql as _sql } from 'kysely';
+import { Kysely, SqliteDialect, sql } from 'kysely';
 import { Database } from './schema';
+import type BetterSqlite3 from 'better-sqlite3';
 
 export interface DatabaseConfig {
   filename: string;
@@ -17,7 +18,7 @@ export interface DatabaseService {
 // SQLite implementation using better-sqlite3
 export class SqliteDatabaseService implements DatabaseService {
   private db: Kysely<Database> | null = null;
-  private sqliteDb: any = null;
+  private sqliteDb: BetterSqlite3.Database | null = null;
   
   constructor(private config: DatabaseConfig) {}
 
@@ -35,9 +36,16 @@ export class SqliteDatabaseService implements DatabaseService {
       
       this.sqliteDb = new BetterSqlite3(this.config.filename, {
         readonly: this.config.readonly ?? false,
-        verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
+        verbose: process.env.NODE_ENV === 'development' ? (message?: unknown): void => {
+          // eslint-disable-next-line no-console
+          console.debug(`[sqlite] ${message}`);
+        } : undefined,
       });
 
+      if (!this.sqliteDb) {
+        throw new Error('SQLite database not initialized');
+      }
+      
       const dialect = new SqliteDialect({
         database: this.sqliteDb
       });
@@ -45,13 +53,13 @@ export class SqliteDatabaseService implements DatabaseService {
       this.db = new Kysely<Database>({ dialect });
       
       // Configure SQLite for optimal performance
-      await this.db.executeQuery(_sql`PRAGMA journal_mode = WAL`.compile(this.db));
-      await this.db.executeQuery(_sql`PRAGMA synchronous = NORMAL`.compile(this.db));
-      await this.db.executeQuery(_sql`PRAGMA foreign_keys = ON`.compile(this.db));
-      await this.db.executeQuery(_sql`PRAGMA busy_timeout = 5000`.compile(this.db));
+      await this.db.executeQuery(sql`PRAGMA journal_mode = WAL`.compile(this.db));
+      await this.db.executeQuery(sql`PRAGMA synchronous = NORMAL`.compile(this.db));
+      await this.db.executeQuery(sql`PRAGMA foreign_keys = ON`.compile(this.db));
+      await this.db.executeQuery(sql`PRAGMA busy_timeout = 5000`.compile(this.db));
       
-    } catch (error: any) {
-      if (error.code === 'MODULE_NOT_FOUND') {
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'MODULE_NOT_FOUND') {
         throw new Error('better-sqlite3 is not installed. Please run: npm install better-sqlite3');
       }
       throw error;
@@ -75,7 +83,7 @@ export class SqliteDatabaseService implements DatabaseService {
     }
     
     // Use SQLite's VACUUM INTO command for atomic backup
-    await this.db?.executeQuery(_sql`VACUUM INTO ${targetPath}`.compile(this.db));
+    await this.db?.executeQuery(sql`VACUUM INTO ${targetPath}`.compile(this.db));
   }
 }
 

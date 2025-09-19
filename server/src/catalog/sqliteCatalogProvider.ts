@@ -43,7 +43,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
         .executeTakeFirst();
 
       if (!resource) {
-        const error: any = new Error('not found');
+        const error = new Error('not found') as Error & { code: string };
         error.code = 'not_found';
         throw error;
       }
@@ -51,13 +51,13 @@ export class SqliteCatalogProvider implements CatalogProvider {
       // Handle URL-based resources
       if (resource.resource_type === 'url') {
         if (!resource.content_url) {
-          const error: any = new Error('URL resource missing content_url');
+          const error = new Error('URL resource missing content_url') as Error & { code: string };
           error.code = 'not_found';
           throw error;
         }
 
         // For URL resources, throw a special error that includes the URL for redirection
-        const redirectError: any = new Error('redirect to url');
+        const redirectError = new Error('redirect to url') as Error & { code: string; url: string };
         redirectError.code = 'redirect_to_url';
         redirectError.url = resource.content_url;
         throw redirectError;
@@ -66,18 +66,19 @@ export class SqliteCatalogProvider implements CatalogProvider {
       // Handle content-based resources (existing logic)
       const contentSize = Buffer.byteLength(resource.content, 'utf8');
       if (contentSize > MAX_FILE_BYTES) {
-        const error: any = new Error('file too large');
+        const error = new Error('file too large') as Error & { code: string };
         error.code = 'file_too_large';
         throw error;
       }
 
       return resource.content;
-    } catch (error: any) {
-      if (error.code === 'not_found' || error.code === 'file_too_large' || error.code === 'redirect_to_url') {
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error && 
+          (error.code === 'not_found' || error.code === 'file_too_large' || error.code === 'redirect_to_url')) {
         throw error;
       }
       logger.error({ error: String(error), category, fileName }, 'Failed to read resource');
-      const notFoundError: any = new Error('not found');
+      const notFoundError = new Error('not found') as Error & { code: string };
       notFoundError.code = 'not_found';
       throw notFoundError;
     }
@@ -110,7 +111,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
     type: 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp', 
     fileName: string, 
     content: string | undefined, 
-    metadata?: Record<string, any>, 
+    metadata?: Record<string, unknown>, 
     resourceType: 'content' | 'url' = 'content',
     contentUrl?: string,
     title?: string,
@@ -156,7 +157,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
       .execute();
   }
 
-  async update(catalogId: number, category: string, fileName: string, content?: string, metadata?: Record<string, any>, resourceType?: 'content' | 'url', contentUrl?: string): Promise<void> {
+  async update(catalogId: number, category: string, fileName: string, content?: string, metadata?: Record<string, unknown>, resourceType?: 'content' | 'url', contentUrl?: string): Promise<void> {
     const db = this.dbService.getKysely();
     
     // Get current resource to determine what to update
@@ -164,7 +165,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
       .selectFrom('resources')
       .select(['resource_type', 'content', 'content_url'])
       .where('catalog_id', '=', catalogId)
-      .where('type', '=', category as any)
+      .where('type', '=', category as 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp')
       .where('filename', '=', fileName)
       .executeTakeFirst();
     
@@ -189,7 +190,13 @@ export class SqliteCatalogProvider implements CatalogProvider {
     // Transform repository URLs to raw content URLs for better performance
     const transformedContentUrl = contentUrl ? transformToRawUrl(contentUrl) : null;
     
-    const updateData: any = {
+    const updateData: {
+      title: string | null;
+      metadata: string | null;
+      resource_type: 'content' | 'url';
+      content?: string;
+      content_url?: string | null;
+    } = {
       title,
       metadata: metadata ? JSON.stringify(metadata) : null,
       resource_type: finalResourceType,
@@ -207,7 +214,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
       .updateTable('resources')
       .set(updateData)
       .where('catalog_id', '=', catalogId)
-      .where('type', '=', category as any)
+      .where('type', '=', category as 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp')
       .where('filename', '=', fileName)
       .execute();
   }
@@ -218,7 +225,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
     await db
       .deleteFrom('resources')
       .where('catalog_id', '=', catalogId)
-      .where('type', '=', category as any)
+      .where('type', '=', category as 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp')
       .where('filename', '=', fileName)
       .execute();
   }

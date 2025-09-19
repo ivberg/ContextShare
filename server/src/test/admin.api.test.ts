@@ -1,11 +1,12 @@
 import assert from 'assert';
 import request from 'supertest';
+import { Application } from 'express';
 import { createApp } from '../http/app';
 import { createDatabaseService, DatabaseService } from '../database/service';
 import { MigrationRunner } from '../database/migrationRunner';
 
 describe('Admin API', () => {
-  let app: any;
+  let app: Application;
   let dbService: DatabaseService;
 
   before(function() {

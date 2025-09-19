@@ -1,12 +1,12 @@
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { DatabaseService } from './service';
 import { logger } from '../logging/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export interface Migration {
-  up: (db: Kysely<any>) => Promise<void>;
-  down: (db: Kysely<any>) => Promise<void>;
+  up: (db: Kysely<unknown>) => Promise<void>;
+  down: (db: Kysely<unknown>) => Promise<void>;
 }
 
 export class MigrationRunner {
@@ -16,23 +16,23 @@ export class MigrationRunner {
     const db = this.dbService.getKysely();
     
     // Create migrations table if it doesn't exist
-    await this.ensureMigrationsTable(db);
+    await this.ensureMigrationsTable(db as Kysely<unknown>);
 
     // Import and run migrations
     const migrations = await this.loadMigrations();
     
     for (const [name, migration] of migrations) {
-      const hasRun = await this.hasMigrationRun(db, name);
+      const hasRun = await this.hasMigrationRun(db as Kysely<unknown>, name);
       if (!hasRun) {
         logger.info({ migration: name }, 'Running migration');
-        await migration.up(db);
-        await this.recordMigration(db, name);
+        await migration.up(db as Kysely<unknown>);
+        await this.recordMigration(db as Kysely<unknown>, name);
         logger.info({ migration: name }, 'Migration completed');
       }
     }
   }
 
-  private async ensureMigrationsTable(db: Kysely<any>): Promise<void> {
+  private async ensureMigrationsTable(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable('_migrations')
       .ifNotExists()
@@ -80,20 +80,12 @@ export class MigrationRunner {
     return migrations;
   }
 
-  private async hasMigrationRun(db: Kysely<any>, name: string): Promise<boolean> {
-    const result = await db
-      .selectFrom('_migrations')
-      .select('name')
-      .where('name', '=', name)
-      .executeTakeFirst();
-    
-    return !!result;
+  private async hasMigrationRun(db: Kysely<unknown>, name: string): Promise<boolean> {
+    const result = await db.executeQuery(sql`SELECT name FROM _migrations WHERE name = ${name}`.compile(db));
+    return Array.isArray(result.rows) && result.rows.length > 0;
   }
 
-  private async recordMigration(db: Kysely<any>, name: string): Promise<void> {
-    await db
-      .insertInto('_migrations')
-      .values({ name })
-      .execute();
+  private async recordMigration(db: Kysely<unknown>, name: string): Promise<void> {
+    await db.executeQuery(sql`INSERT INTO _migrations (name) VALUES (${name})`.compile(db));
   }
 }

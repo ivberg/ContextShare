@@ -46,9 +46,10 @@ describe('Database Integration (Mock)', () => {
     try {
       await dbService.initialize();
       assert.fail('Should have thrown an error');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Expect some kind of database error (empty filename should fail)
-      assert(error.message.length > 0);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      assert(errorMessage.length > 0);
     }
   });
 

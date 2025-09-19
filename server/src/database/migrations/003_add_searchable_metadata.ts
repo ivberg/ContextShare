@@ -1,6 +1,6 @@
 import { Kysely } from 'kysely';
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<unknown>): Promise<void> {
   // Step 1: Drop the existing category index before renaming (if it exists)
   try {
     await db.schema.dropIndex('idx_resources_category').execute();
@@ -62,7 +62,7 @@ export async function up(db: Kysely<any>): Promise<void> {
   // No FTS complexity needed for now - can be added later if advanced search is required
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down(db: Kysely<unknown>): Promise<void> {
   // Drop indexes
   await db.schema.dropIndex('idx_resources_category').execute();
   await db.schema.dropIndex('idx_resources_type').execute();

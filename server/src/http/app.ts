@@ -127,16 +127,16 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
 
   app.get('/catalog/:category/:file', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { category, file } = req.params as any;
+      const { category, file } = req.params as { category: string; file: string };
       if(!allowedCategories.has(category)) {return res.status(404).json({ error: 'category_not_found' });}
       const buf = await provider.read(category, file);
       const data = Buffer.isBuffer(buf) ? buf.toString('utf8') : buf;
       res.setHeader('Content-Type', inferContentType(file));
       res.send(data);
-    } catch (e: any) { 
+    } catch (e: unknown) { 
       // Handle URL-based resources with redirect
-      if (e.code === 'redirect_to_url') {
-        return res.redirect(302, e.url);
+      if (e && typeof e === 'object' && 'code' in e && e.code === 'redirect_to_url' && 'url' in e) {
+        return res.redirect(302, e.url as string);
       }
       next(e); 
     }
@@ -151,21 +151,23 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
   });
 
   // Basic error handler
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     let code = 'internal';
     let status = 500;
     if(err && typeof err === 'object'){
-      if(err.code === 'file_too_large'){ code = 'file_too_large'; status = 413; }
-      else if(err.code === 'not_found'){ code = 'not_found'; status = 404; }
+      if('code' in err && err.code === 'file_too_large'){ code = 'file_too_large'; status = 413; }
+      else if('code' in err && err.code === 'not_found'){ code = 'not_found'; status = 404; }
       // Handle Zod validation errors
-      else if(err.name === 'ZodError' || err.issues){ 
+      else if(('name' in err && err.name === 'ZodError') || 'issues' in err){ 
         code = 'validation_error'; 
         status = 400; 
-        logger.error({ err: JSON.stringify(err.issues ?? err.errors), code });
-        return res.status(status).json({ error: code, details: err.issues ?? err.errors });
+        const issues = 'issues' in err ? err.issues : ('errors' in err ? err.errors : undefined);
+        logger.error({ err: JSON.stringify(issues), code });
+        return res.status(status).json({ error: code, details: issues });
       }
     }
-    logger.error({ err: String(err?.message ?? err), code });
+    const message = err && typeof err === 'object' && 'message' in err ? err.message : err;
+    logger.error({ err: String(message), code });
     res.status(status).json({ error: code });
   });
 

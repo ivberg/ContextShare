@@ -1,6 +1,6 @@
 import { Kysely, sql } from 'kysely';
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<unknown>): Promise<void> {
   // Add new columns to resources table (only if they don't exist)
   try {
     await db.schema
@@ -24,11 +24,7 @@ export async function up(db: Kysely<any>): Promise<void> {
 
   // Update existing resources to have resource_type = 'content' (only if needed)
   try {
-    await db
-      .updateTable('resources')
-      .set({ resource_type: 'content' })
-      .where('resource_type', 'is', null)
-      .execute();
+    await sql`UPDATE resources SET resource_type = 'content' WHERE resource_type IS NULL`.execute(db);
   } catch {
     // Might fail if column doesn't exist or is already set, that's okay
   }
@@ -81,7 +77,7 @@ export async function up(db: Kysely<any>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down(db: Kysely<unknown>): Promise<void> {
   // Drop triggers
   await sql`DROP TRIGGER IF EXISTS check_resource_content_or_url`.execute(db);
   await sql`DROP TRIGGER IF EXISTS check_resource_content_or_url_update`.execute(db);

@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { SqliteDatabaseService } from '../database/service.js';
 import { sql } from 'kysely';
+import { logger } from '../logging/logger.js';
 
 const program = new Command();
 
@@ -25,22 +26,25 @@ program
       const result = await sql`${sql.raw(query)}`.execute(db);
       
       if (options.format === 'json') {
-        console.log(JSON.stringify(result.rows, null, 2));
+        process.stdout.write(JSON.stringify(result.rows, null, 2) + '\n');
       } else {
         // Table format
         if (result.rows.length === 0) {
-          console.log('No results found.');
+          process.stdout.write('No results found.\n');
         } else {
+          // Use console.table for structured output (allowed for CLI tools)
+          // eslint-disable-next-line no-console
           console.table(result.rows);
         }
       }
       
-      console.log(`\n${result.rows.length} row(s) returned.`);
+      process.stdout.write(`\n${result.rows.length} row(s) returned.\n`);
       
       await dbService.close();
       
     } catch (error) {
-      console.error('Error executing query:', error);
+      logger.error({ error: String(error), query }, 'Error executing database query');
+      process.stderr.write(`Error executing query: ${String(error)}\n`);
       process.exit(1);
     }
   });

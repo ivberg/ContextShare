@@ -7,7 +7,7 @@ export interface CatalogProvider {
     type: 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp',
     fileName: string,
     content: string | undefined,
-    metadata?: Record<string, any>,
+    metadata?: Record<string, unknown>,
     resourceType?: 'content' | 'url',
     contentUrl?: string,
     title?: string,

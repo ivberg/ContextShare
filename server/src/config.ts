@@ -43,7 +43,7 @@ export interface ServerConfig {
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
   // Merge CLI args (do not overwrite explicit env if already set)
   const cli = parseArgv(process.argv.slice(2));
-  const merged: Record<string,string|undefined> = { ...env } as any;
+  const merged: Record<string,string|undefined> = { ...env };
   if(!merged.CATALOG_ROOT && cli.CATALOG_ROOT) {merged.CATALOG_ROOT = cli.CATALOG_ROOT;}
   if(!merged.PORT && cli.PORT) {merged.PORT = cli.PORT;}
   if(!merged.MODE && cli.MODE) {merged.MODE = cli.MODE;}

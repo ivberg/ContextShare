@@ -30,14 +30,14 @@ export class FileSystemCatalogProvider implements CatalogProvider {
     try {
       const data = await fs.readFile(full);
       if(data.byteLength > MAX_FILE_BYTES){
-        const err: any = new Error('file too large');
+        const err = new Error('file too large') as Error & { code: string };
         err.code = 'file_too_large';
         throw err;
       }
       return data;
-    } catch (e: any){
-      if(e && e.code === 'ENOENT'){
-        const nf: any = new Error('not found');
+    } catch (e: unknown){
+      if(e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT'){
+        const nf = new Error('not found') as Error & { code: string };
         nf.code = 'not_found';
         throw nf;
       }
