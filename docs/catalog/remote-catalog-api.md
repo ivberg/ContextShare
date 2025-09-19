@@ -300,5 +300,90 @@ Configure the extension (settings.json):
 For questions or enhancements, open an issue in the repository referencing this document (`remote-catalog-api.md`). Provide example URLs, manifest samples, and logs (with sensitive data removed).
 
 ---
+## 16. (Database Mode) Bulk Catalog Export API
+
+Provides a single fetch of all enabled catalogs and their enabled resources with a lean schema (IDs and enabled flags removed; resource type implied by grouping).
+
+Endpoint:
+```
+GET /admin/catalog-export
+```
+
+Minimal Response Structure:
+```jsonc
+{
+	"generated_at": "2025-09-19T21:30:00.000Z",
+	"catalogs": [
+		{
+			"name": "engineering",
+			"display_name": "Engineering Catalog",
+			"description": "Primary engineering assistant assets",
+			"source_type": "local",
+			"source_path": null,
+			"source_url": null,
+			"created_at": "2025-09-19T20:00:00.000Z",
+			"updated_at": "2025-09-19T21:00:00.000Z",
+			"resources": {
+				"instructions": [
+					{
+						"filename": "onboarding.instructions.md",
+						"title": "Onboarding Guide",
+						"description": "Team onboarding sequence",
+						"category": "people-success",
+						"tags": "hr,getting-started",
+						"content_type": "text/markdown",
+						"resource_type": "content",
+						"content": "# Onboarding...",          // Present iff content resource and <=50KB
+						"truncated": true,                      // Indicates large content omitted
+						"size": 98765,                          // Character size when truncated or for reference
+						"created_at": "2025-09-18T18:00:00.000Z",
+						"updated_at": "2025-09-19T18:00:00.000Z"
+					}
+				],
+				"chatmodes": [],
+				"prompts": [],
+				"tasks": [],
+				"mcp": []
+			}
+		}
+	],
+	"counts": { "catalogs": 1, "resources": 42 }
+}
+```
+
+Resource Summary Fields (per category array):
+| Field | Notes |
+|-------|-------|
+| filename | Resource file name as stored |
+| title, description | Optional metadata if provided |
+| category, tags | Optional domain taxonomy / search tags |
+| content_type | MIME/derived type (e.g. `text/markdown`) |
+| resource_type | `content` or `url` |
+| content_url | Present only for `url` resources |
+| metadata | Parsed JSON if original metadata existed |
+| content | Inlined only when `resource_type=content` and size <= 50KB |
+| truncated | Boolean flag if original content exceeded inline limit |
+| size | Character length for content resources (always when truncated, optional otherwise) |
+| created_at / updated_at | Original timestamps |
+
+Behavior & Constraints:
+* Only enabled catalogs/resources are returned; disabled items filtered server side.
+* No `id`, `enabled`, or per-entry `type` properties (type implicit by array key).
+* >50KB content omitted; `truncated` + `size` signal presence and original length.
+* Hard guard at 10,000 resources → `413 export_too_large` response.
+* `Cache-Control: no-store` to encourage fresh pulls; clients may cache if desired.
+
+Intended Uses:
+* One-step synchronization (search index, offline snapshot, diffing environment contents).
+* Bootstrap for tooling that needs full metadata before selective caching.
+
+Planned / Potential Enhancements (non-breaking):
+* Pagination or streaming (`?cursor=`)
+* `?inlineContent=false` toggle
+* Per-resource hash digests for delta sync
+* ETag/If-None-Match conditional fetch
+* Field projection (`?fields=filename,title`)
+
+---
 *Last updated: 2025-09-15*
 
