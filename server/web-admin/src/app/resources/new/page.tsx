@@ -4,7 +4,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { catalogApi, resourceApi } from '@/lib/api';
-import { Catalog, CreateResourceRequest, ResourceCategory } from '@/types/api';
+import { Catalog, CreateResourceRequest, ResourceType } from '@/types/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Alert from '@/components/ui/Alert';
 import CodeEditor from '@/components/ui/CodeEditor';
@@ -17,7 +17,7 @@ import {
   Settings
 } from 'lucide-react';
 
-const categoryOptions: { value: ResourceCategory; label: string; icon: typeof FileText }[] = [
+const categoryOptions: { value: ResourceType; label: string; icon: typeof FileText }[] = [
   { value: 'instructions', label: 'Instructions', icon: FileText },
   { value: 'prompts', label: 'Prompts', icon: MessageSquare },
   { value: 'chatmodes', label: 'Chat Modes', icon: MessageSquare },
@@ -25,7 +25,7 @@ const categoryOptions: { value: ResourceCategory; label: string; icon: typeof Fi
   { value: 'mcp', label: 'MCP Configs', icon: Settings },
 ];
 
-const getFileExtensionForCategory = (category: ResourceCategory): string => {
+const getFileExtensionForCategory = (category: ResourceType): string => {
   switch (category) {
     case 'instructions':
       return '.instructions.md';
@@ -42,7 +42,7 @@ const getFileExtensionForCategory = (category: ResourceCategory): string => {
   }
 };
 
-const getDefaultContentForCategory = (category: ResourceCategory, filename: string): string => {
+const getDefaultContentForCategory = (category: ResourceType, filename: string): string => {
   const name = filename.replace(/\.[^.]+$/, ''); // Remove extension
   
   switch (category) {
@@ -84,7 +84,7 @@ const getDefaultContentForCategory = (category: ResourceCategory, filename: stri
   }
 };
 
-const getLanguageForCategory = (category: ResourceCategory): string => {
+const getLanguageForCategory = (category: ResourceType): string => {
   switch (category) {
     case 'tasks':
     case 'mcp':
@@ -120,7 +120,7 @@ function NewResourceForm() {
 
   const [formData, setFormData] = useState<{
     catalogId: number | '';
-    category: ResourceCategory;
+    category: ResourceType;
     filename: string;
     content: string;
     contentUrl: string;
@@ -146,7 +146,7 @@ function NewResourceForm() {
 
         // Set defaults from URL params
         const catalogIdParam = searchParams.get('catalogId');
-        const categoryParam = searchParams.get('category') as ResourceCategory;
+        const categoryParam = searchParams.get('category') as ResourceType;
         
         if (catalogIdParam) {
           const catalogId = parseInt(catalogIdParam);
@@ -185,7 +185,7 @@ function NewResourceForm() {
     const { name, value } = e.target;
     
     if (name === 'category') {
-      const newCategory = value as ResourceCategory;
+      const newCategory = value as ResourceType;
       const newFilename = formData.filename 
         ? formData.filename.replace(/\.[^.]+$/, '') + getFileExtensionForCategory(newCategory)
         : '';
@@ -254,7 +254,7 @@ function NewResourceForm() {
 
       const createRequest: CreateResourceRequest = {
         catalogId: formData.catalogId as number,
-        category: formData.category,
+        type: formData.category,  // formData.category actually contains the resource type
         filename: formData.filename,
         resourceType: formData.resourceType,
       };

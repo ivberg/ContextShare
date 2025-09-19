@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { resourceApi } from '@/lib/api';
-import { ResourceContent, ResourceCategory } from '@/types/api';
+import { ResourceContent, ResourceType } from '@/types/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Alert from '@/components/ui/Alert';
 import CodeEditor from '@/components/ui/CodeEditor';
@@ -26,7 +26,7 @@ const categoryIcons = {
   mcp: Settings,
 };
 
-const getLanguageForCategory = (category: ResourceCategory, filename: string): string => {
+const getLanguageForCategory = (category: ResourceType, filename: string): string => {
   if (filename.endsWith('.json')) return 'json';
   if (filename.endsWith('.md')) return 'markdown';
   if (filename.endsWith('.yaml') || filename.endsWith('.yml')) return 'yaml';
@@ -45,7 +45,7 @@ export default function ResourceEditPage() {
   const router = useRouter();
   
   const catalogId = parseInt(params.catalogId as string);
-  const category = params.category as ResourceCategory;
+  const category = params.category as ResourceType;
   const filename = params.filename as string;
 
   const [resource, setResource] = useState<ResourceContent | null>(null);
@@ -299,12 +299,12 @@ export default function ResourceEditPage() {
           
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <p className="text-sm font-medium text-gray-700">Category</p>
+              <p className="text-sm font-medium text-gray-700">Resource Type</p>
               <p className="mt-1 text-sm text-gray-600 capitalize">{category}</p>
             </div>
             
             <div>
-              <p className="text-sm font-medium text-gray-700">Resource Type</p>
+              <p className="text-sm font-medium text-gray-700">Storage Type</p>
               <p className="mt-1 text-sm text-gray-600 capitalize">{resource.resource_type}</p>
             </div>
             
@@ -324,6 +324,20 @@ export default function ResourceEditPage() {
               <div>
                 <p className="text-sm font-medium text-gray-700">Description</p>
                 <p className="mt-1 text-sm text-gray-600">{resource.description}</p>
+              </div>
+            )}
+            
+            {resource.category && (
+              <div>
+                <p className="text-sm font-medium text-gray-700">Domain Category</p>
+                <p className="mt-1 text-sm text-gray-600">{resource.category}</p>
+              </div>
+            )}
+            
+            {resource.tags && (
+              <div>
+                <p className="text-sm font-medium text-gray-700">Tags</p>
+                <p className="mt-1 text-sm text-gray-600">{resource.tags}</p>
               </div>
             )}
           </div>

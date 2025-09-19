@@ -120,7 +120,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
     const db = this.dbService.getKysely();
     
     const contentType = this.inferContentType(fileName);
-    const inferredTitle = title || (resourceType === 'content' && content 
+    const inferredTitle = title ?? (resourceType === 'content' && content 
       ? this.inferTitle(fileName, content) 
       : this.inferTitleFromFilename(fileName));
     
@@ -139,13 +139,13 @@ export class SqliteCatalogProvider implements CatalogProvider {
         type: type,
         filename: fileName,
         title: inferredTitle,
-        description: description || null,
-        category: category || null,
-        tags: tags || null,
-        content: resourceType === 'content' ? content! : '',
+        description: description ?? null,
+        category: category ?? null,
+        tags: tags ?? null,
+        content: resourceType === 'content' ? (content ?? '') : '',
         content_type: contentType,
         resource_type: resourceType,
-        content_url: resourceType === 'url' ? contentUrl! : null,
+        content_url: resourceType === 'url' ? (contentUrl ?? null) : null,
         metadata: metadata ? JSON.stringify(metadata) : null,
         enabled: 1, // SQLite boolean as integer
       })
@@ -168,7 +168,7 @@ export class SqliteCatalogProvider implements CatalogProvider {
       throw new Error('Resource not found');
     }
     
-    const finalResourceType = resourceType || currentResource.resource_type;
+    const finalResourceType = resourceType ?? currentResource.resource_type;
     const title = finalResourceType === 'content' && content 
       ? this.inferTitle(fileName, content) 
       : this.inferTitleFromFilename(fileName);
@@ -189,11 +189,11 @@ export class SqliteCatalogProvider implements CatalogProvider {
     };
     
     if (finalResourceType === 'content') {
-      updateData.content = content!;
+      updateData.content = content ?? '';
       updateData.content_url = null;
     } else {
       updateData.content = '';
-      updateData.content_url = contentUrl!;
+      updateData.content_url = contentUrl ?? null;
     }
     
     await db

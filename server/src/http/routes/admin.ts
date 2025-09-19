@@ -6,10 +6,25 @@ import { DatabaseService } from '../../database/service';
 import { logger } from '../../logging/logger';
 import { LruCache } from '../../cache/lru';
 
+// API Response Types - these should match the client types exactly
+interface ResourceContentResponse {
+  content?: string | null;
+  content_type: string;
+  resource_type: 'content' | 'url';
+  content_url?: string | null;
+  metadata?: Record<string, unknown> | null;
+  title?: string | null;
+  description?: string | null;
+  category?: string | null;
+  tags?: string | null;
+}
+
 // Validation schemas
+const resourceTypeSchema = z.enum(['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp']);
+
 const createResourceSchema = z.object({
   catalogId: z.number().int().positive(),
-  type: z.enum(['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp']),
+  type: resourceTypeSchema,
   filename: z.string().min(1).max(255),
   title: z.string().optional(),
   description: z.string().optional(),
@@ -32,6 +47,10 @@ const createResourceSchema = z.object({
 });
 
 const updateResourceSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  category: z.string().optional(), // Domain/technology category
+  tags: z.string().optional(),     // Comma-separated tags
   content: z.string().optional(),
   contentUrl: z.string().url().optional(),
   resourceType: z.enum(['content', 'url']).optional(),
@@ -140,11 +159,15 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         .innerJoin('catalogs', 'resources.catalog_id', 'catalogs.id')
         .select([
           'resources.id',
-          'resources.category',
+          'resources.type',          // Resource type (chatmodes, instructions, etc.)
+          'resources.category',      // Domain category (automation, web-development, etc.)
+          'resources.tags',          // Searchable tags
           'resources.filename',
           'resources.title',
           'resources.description',
           'resources.content_type',
+          'resources.resource_type', // Storage type (content or url)
+          'resources.content_url',   // URL for url-type resources
           'resources.enabled',
           'resources.created_at',
           'resources.updated_at',
@@ -173,7 +196,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
           data.catalogId,
           data.type,
           data.filename,
-          data.content!,
+          data.content ?? '',
           data.metadata,
           'content',
           undefined,
@@ -190,7 +213,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
           undefined as never,
           data.metadata,
           'url',
-          data.contentUrl!,
+          data.contentUrl ?? '',
           data.title,
           data.description,
           data.category,
@@ -203,7 +226,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         .selectFrom('resources')
         .selectAll()
         .where('catalog_id', '=', data.catalogId)
-        .where('type', '=', data.type as 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp')
+        .where('type', '=', data.type)
         .where('filename', '=', data.filename)
         .executeTakeFirstOrThrow();
 
@@ -234,11 +257,18 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         return res.status(400).json({ error: 'Invalid catalog ID' });
       }
 
+      // Validate that category is a valid resource type
+      const resourceTypeResult = resourceTypeSchema.safeParse(category);
+      if (!resourceTypeResult.success) {
+        return res.status(400).json({ error: 'Invalid resource type' });
+      }
+      const resourceType = resourceTypeResult.data;
+
       const data = updateResourceSchema.parse(req.body);
       
       await catalogProvider.update(
         catalogId,
-        category,
+        resourceType,
         filename,
         data.content,
         data.metadata,
@@ -246,10 +276,10 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         data.contentUrl
       );
 
-      logger.info({ catalogId, category, filename, resourceType: data.resourceType }, 'Resource updated');
+      logger.info({ catalogId, resourceType, filename, storageType: data.resourceType }, 'Resource updated');
       
       // Invalidate index cache for this category
-      invalidateCache(category);
+      invalidateCache(resourceType);
       
       res.json({ message: 'Resource updated successfully' });
     } catch (error) {
@@ -268,12 +298,19 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         return res.status(400).json({ error: 'Invalid catalog ID' });
       }
 
-      await catalogProvider.delete(catalogId, category, filename);
+      // Validate that category is a valid resource type
+      const resourceTypeResult = resourceTypeSchema.safeParse(category);
+      if (!resourceTypeResult.success) {
+        return res.status(400).json({ error: 'Invalid resource type' });
+      }
+      const resourceType = resourceTypeResult.data;
 
-      logger.info({ catalogId, category, filename }, 'Resource deleted');
+      await catalogProvider.delete(catalogId, resourceType, filename);
+
+      logger.info({ catalogId, resourceType, filename }, 'Resource deleted');
       
       // Invalidate index cache for this category
-      invalidateCache(category);
+      invalidateCache(resourceType);
       
       res.json({ message: 'Resource deleted successfully' });
     } catch (error) {
@@ -292,11 +329,18 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         return res.status(400).json({ error: 'Invalid catalog ID' });
       }
 
+      // Validate that category is a valid resource type
+      const resourceTypeResult = resourceTypeSchema.safeParse(category);
+      if (!resourceTypeResult.success) {
+        return res.status(400).json({ error: 'Invalid resource type' });
+      }
+      const resourceType = resourceTypeResult.data;
+
       const resource = await db
         .selectFrom('resources')
-        .select(['content', 'content_type', 'resource_type', 'content_url', 'metadata', 'title', 'description'])
+        .select(['content', 'content_type', 'resource_type', 'content_url', 'metadata', 'title', 'description', 'category', 'tags'])
         .where('catalog_id', '=', catalogId)
-        .where('category', '=', category as any)
+        .where('type', '=', resourceType)  // Now properly typed
         .where('filename', '=', filename)
         .executeTakeFirst();
 
@@ -304,15 +348,20 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         return res.status(404).json({ error: 'Resource not found' });
       }
 
-      res.json({
+      // Strongly typed response - TypeScript will catch mismatches
+      const response: ResourceContentResponse = {
         content: resource.content,
-        contentType: resource.content_type,
-        resourceType: resource.resource_type,
-        contentUrl: resource.content_url,
+        content_type: resource.content_type,
+        resource_type: resource.resource_type,
+        content_url: resource.content_url,
         metadata: resource.metadata ? JSON.parse(resource.metadata) : null,
         title: resource.title,
         description: resource.description,
-      });
+        category: resource.category,
+        tags: resource.tags,
+      };
+
+      res.json(response);
     } catch (error) {
       next(error);
     }

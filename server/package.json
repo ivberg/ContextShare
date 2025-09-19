@@ -15,9 +15,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "db:migrate": "kysely-migration-cli migrate",
     "db:create-migration": "kysely-migration-cli create",
-    "migrate:single": "node dist/tools/migrate-cli.js single",
-    "migrate:batch": "node dist/tools/migrate-cli.js batch",
-    "migrate:init-config": "node dist/tools/migrate-cli.js init-config"
+    "db:query": "node dist/tools/db-query.js"
   },
   "dependencies": {
     "@types/cors": "^2.8.19",

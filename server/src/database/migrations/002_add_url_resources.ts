@@ -9,7 +9,7 @@ export async function up(db: Kysely<any>): Promise<void> {
         col.notNull().defaultTo('content').check(sql`resource_type IN ('content', 'url')`)
       )
       .execute();
-  } catch (error) {
+  } catch {
     // Column might already exist, that's okay
   }
 
@@ -18,7 +18,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .alterTable('resources')
       .addColumn('content_url', 'text')
       .execute();
-  } catch (error) {
+  } catch {
     // Column might already exist, that's okay
   }
 
@@ -29,7 +29,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .set({ resource_type: 'content' })
       .where('resource_type', 'is', null)
       .execute();
-  } catch (error) {
+  } catch {
     // Might fail if column doesn't exist or is already set, that's okay
   }
 
@@ -53,7 +53,7 @@ export async function up(db: Kysely<any>): Promise<void> {
         END;
       END
     `.execute(db);
-  } catch (error) {
+  } catch {
     // Trigger might already exist, that's okay
   }
 
@@ -76,7 +76,7 @@ export async function up(db: Kysely<any>): Promise<void> {
         END;
       END
     `.execute(db);
-  } catch (error) {
+  } catch {
     // Trigger might already exist, that's okay
   }
 }

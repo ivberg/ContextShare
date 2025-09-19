@@ -157,26 +157,6 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            href="/resources/instructions"
-            className="flex items-center rounded-lg border border-gray-300 p-6 hover:bg-gray-50"
-          >
-            <div className="mx-auto">
-              <FileText className="mx-auto h-8 w-8 text-blue-500" />
-              <span className="mt-2 block text-sm font-medium text-gray-900">Manage Instructions</span>
-            </div>
-          </Link>
-
-          <Link
-            href="/resources/prompts"
-            className="flex items-center rounded-lg border border-gray-300 p-6 hover:bg-gray-50"
-          >
-            <div className="mx-auto">
-              <FileText className="mx-auto h-8 w-8 text-green-500" />
-              <span className="mt-2 block text-sm font-medium text-gray-900">Manage Prompts</span>
-            </div>
-          </Link>
-
-          <Link
             href="/health"
             className="flex items-center rounded-lg border border-gray-300 p-6 hover:bg-gray-50"
           >

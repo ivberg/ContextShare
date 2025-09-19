@@ -7,10 +7,6 @@ import {
   Menu, 
   X, 
   Database, 
-  FileText, 
-  MessageSquare, 
-  Zap, 
-  Settings, 
   Home,
   Activity
 } from 'lucide-react';
@@ -26,11 +22,6 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
     { name: 'Catalogs', href: '/catalogs', icon: Database },
-    { name: 'Instructions', href: '/resources/instructions', icon: FileText },
-    { name: 'Prompts', href: '/resources/prompts', icon: MessageSquare },
-    { name: 'Chat Modes', href: '/resources/chatmodes', icon: MessageSquare },
-    { name: 'Tasks', href: '/resources/tasks', icon: Zap },
-    { name: 'MCP Configs', href: '/resources/mcp', icon: Settings },
     { name: 'Health Check', href: '/health', icon: Activity },
   ];
 

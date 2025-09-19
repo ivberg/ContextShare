@@ -115,12 +115,12 @@ export default function CatalogDetailPage() {
     );
   }
 
-  // Group resources by category
-  const resourcesByCategory = resources.reduce((acc, resource) => {
-    if (!acc[resource.category]) {
-      acc[resource.category] = [];
+  // Group resources by type (chatmodes, instructions, etc.)
+  const resourcesByType = resources.reduce((acc, resource) => {
+    if (!acc[resource.type]) {
+      acc[resource.type] = [];
     }
-    acc[resource.category].push(resource);
+    acc[resource.type].push(resource);
     return acc;
   }, {} as Record<string, Resource[]>);
 
@@ -269,34 +269,34 @@ export default function CatalogDetailPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {Object.entries(resourcesByCategory).map(([category, categoryResources]) => {
-              const Icon = categoryIcons[category as keyof typeof categoryIcons] || FileText;
-              const iconColor = categoryColors[category as keyof typeof categoryColors] || 'text-gray-500';
+            {Object.entries(resourcesByType).map(([resourceType, typeResources]) => {
+              const Icon = categoryIcons[resourceType as keyof typeof categoryIcons] || FileText;
+              const iconColor = categoryColors[resourceType as keyof typeof categoryColors] || 'text-gray-500';
               
               return (
-                <div key={category} className="rounded-lg bg-white shadow">
+                <div key={resourceType} className="rounded-lg bg-white shadow">
                   <div className="border-b border-gray-200 px-6 py-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center">
                         <Icon className={`h-5 w-5 ${iconColor}`} />
                         <h3 className="ml-2 text-lg font-medium text-gray-900 capitalize">
-                          {category}
+                          {resourceType}
                         </h3>
                         <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                          {categoryResources.length}
+                          {typeResources.length}
                         </span>
                       </div>
                       <Link
-                        href={`/resources/new?catalogId=${catalog.id}&category=${category}`}
+                        href={`/resources/new?catalogId=${catalog.id}&category=${resourceType}`}
                         className="text-sm text-blue-600 hover:text-blue-500"
                       >
-                        Add {category.slice(0, -1)}
+                        Add {resourceType.slice(0, -1)}
                       </Link>
                     </div>
                   </div>
                   
                   <div className="divide-y divide-gray-200">
-                    {categoryResources.map((resource) => (
+                    {typeResources.map((resource) => (
                       <div key={resource.id} className="px-6 py-4">
                         <div className="flex items-center justify-between">
                           <div>
@@ -323,7 +323,7 @@ export default function CatalogDetailPage() {
                               </span>
                             )}
                             <Link
-                              href={`/resources/${catalog.id}/${category}/${resource.filename}`}
+                              href={`/resources/${catalog.id}/${resourceType}/${resource.filename}`}
                               className="text-sm text-blue-600 hover:text-blue-500"
                             >
                               Edit

@@ -68,13 +68,15 @@ export interface UpdateResourceRequest {
 }
 
 export interface ResourceContent {
-  content?: string;
+  content?: string | null;
   content_type: string;
   resource_type: 'content' | 'url';
-  content_url?: string;
-  metadata?: string;
-  title?: string;
-  description?: string;
+  content_url?: string | null;
+  metadata?: string | null;
+  title?: string | null;
+  description?: string | null;
+  category?: string | null;  // Domain/technology category
+  tags?: string | null;      // Comma-separated tags
 }
 
 export type ResourceType = 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp';

@@ -6,7 +6,7 @@ import {
   CreateResourceRequest,
   UpdateResourceRequest,
   ResourceContent,
-  ResourceCategory,
+  ResourceType,
   ApiError
 } from '@/types/api';
 
@@ -63,7 +63,7 @@ export const resourceApi = {
   // Update a resource
   async update(
     catalogId: number,
-    category: ResourceCategory,
+    category: ResourceType,
     filename: string,
     update: UpdateResourceRequest
   ): Promise<{ message: string }> {
@@ -74,7 +74,7 @@ export const resourceApi = {
   // Delete a resource
   async delete(
     catalogId: number,
-    category: ResourceCategory,
+    category: ResourceType,
     filename: string
   ): Promise<{ message: string }> {
     const response = await api.delete(`/admin/resources/${catalogId}/${category}/${filename}`);
@@ -84,7 +84,7 @@ export const resourceApi = {
   // Get resource content
   async getContent(
     catalogId: number,
-    category: ResourceCategory,
+    category: ResourceType,
     filename: string
   ): Promise<ResourceContent> {
     const response: AxiosResponse<ResourceContent> = await api.get(

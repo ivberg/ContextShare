@@ -4,7 +4,7 @@ export async function up(db: Kysely<any>): Promise<void> {
   // Step 1: Drop the existing category index before renaming (if it exists)
   try {
     await db.schema.dropIndex('idx_resources_category').execute();
-  } catch (error) {
+  } catch {
     // Index might not exist, that's okay
   }
 
@@ -14,7 +14,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .alterTable('resources')
       .renameColumn('category', 'type')
       .execute();
-  } catch (error) {
+  } catch {
     // Column might already be renamed, that's okay
   }
 
@@ -24,7 +24,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .alterTable('resources')
       .addColumn('category', 'text') // Domain/technology category (web-development, cloud, database, etc.)
       .execute();
-  } catch (error) {
+  } catch {
     // Column might already exist, that's okay
   }
 
@@ -33,7 +33,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .alterTable('resources')
       .addColumn('tags', 'text') // Comma-separated searchable tags (react,typescript,beginner)
       .execute();
-  } catch (error) {
+  } catch {
     // Column might already exist, that's okay
   }
 
@@ -44,7 +44,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .on('resources')
       .column('type')
       .execute();
-  } catch (error) {
+  } catch {
     // Index might already exist, that's okay
   }
 
@@ -54,7 +54,7 @@ export async function up(db: Kysely<any>): Promise<void> {
       .on('resources')
       .column('category')
       .execute();
-  } catch (error) {
+  } catch {
     // Index might already exist, that's okay
   }
 
