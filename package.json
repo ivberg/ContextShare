@@ -96,9 +96,9 @@
           "description": "Single remote catalog base (absolute path or http(s) URL). Child folders chatmodes/, instructions/, prompts/, tasks/, mcp/ are fetched automatically (each must expose index.json for directory mode).",
           "order": 131
         },
-        "copilotCatalog.dev.allowInsecureHttp": {"type": "boolean", "default": false, "description": "(Development only) Allow HTTP and localhost/private IP remote catalog URLs for testing. DO NOT ENABLE in production workspaces.", "order": 140}
-  ,"copilotCatalog.dev.disableLogRedaction": {"type": "boolean", "default": false, "description": "(Development only) Disable path/URL redaction in logs to aid debugging. May expose local paths; do not enable in shared environments.", "order": 141}
-  ,"copilotCatalog.dev.showBuildTimestamp": {"type": "boolean", "default": false, "description": "(Development only) Show a status bar item with extension version + activation timestamp for quick confirmation you are on the latest reload.", "order": 142}
+        "copilotCatalog.dev.allowInsecureHttp": {"type": "boolean", "default": false, "description": "(Development only) Allow HTTP and localhost/private IP remote catalog URLs for testing. DO NOT ENABLE in production workspaces.", "order": 140},
+        "copilotCatalog.dev.disableLogRedaction": {"type": "boolean", "default": false, "description": "(Development only) Disable path/URL redaction in logs to aid debugging. May expose local paths; do not enable in shared environments.", "order": 141},
+        "copilotCatalog.dev.showBuildTimestamp": {"type": "boolean", "default": false, "description": "(Development only) Show a status bar item with extension version + activation timestamp for quick confirmation you are on the latest reload.", "order": 142}
       }
     },
     "viewsContainers": {

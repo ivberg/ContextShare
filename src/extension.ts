@@ -143,6 +143,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Create service instances and tree/webview providers
 		const overviewTree = new OverviewTreeProvider();
 		const remoteHatService = new RemoteHatService();
+		
+		// Configure remote hat service with server URL
+		const vsConfig = vscode.workspace.getConfiguration();
+		const remoteCatalogServer = vsConfig.get<string>('copilotCatalog.remoteBase', '');
+		if (remoteCatalogServer && remoteCatalogServer.trim()) {
+			remoteHatService.setBaseUrl(remoteCatalogServer.trim());
+			logger.info(`Remote hat service configured with server: ${remoteCatalogServer.trim()}`);
+		} else {
+			logger.info('Remote hat service not configured (no server URL)');
+		}
+		
 		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
 		// Configure hat service to use local repository
 		hatService.setLocalRepoPath(localRepoService.getLocalRepoPath());
