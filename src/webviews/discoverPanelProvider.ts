@@ -10,6 +10,7 @@ interface DiscoverResult {
   id: string; 
   label: string; 
   description?: string;
+  resourceBreakdown?: string; // Category breakdown of resources
   isLocal?: boolean; // For local resources
   isPulled?: boolean; // For remote resources that exist locally
 }
@@ -172,6 +173,7 @@ export class DiscoverPanelProvider {
         id: hat.id,
         label: hat.name,
         description: hat.description,
+        resourceBreakdown: this.calculateResourceBreakdown(hat.resources),
         isLocal: true
       }));
     } catch (error) {
@@ -185,11 +187,18 @@ export class DiscoverPanelProvider {
       const items = await this.remoteHatService.queryHats(q);
       // Check which remote items are already pulled locally
       const localHats = await this.getLocalHats();
-      this.remoteResults = items.map(i => ({
-        id: i.id,
-        label: i.name,
-        description: i.description,
-        isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+      this.remoteResults = await Promise.all(items.map(async i => {
+        // Get full hat data to calculate resource breakdown
+        const fullHat = await this.remoteHatService.getHat(i.id);
+        const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
+        
+        return {
+          id: i.id,
+          label: i.name,
+          description: i.description,
+          resourceBreakdown,
+          isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+        };
       }));
     } else {
       // Search local resources
@@ -204,6 +213,22 @@ export class DiscoverPanelProvider {
     this._update();
   }
 
+  private calculateResourceBreakdown(resources: string[]): string {
+    const categoryCounts = new Map<string, number>();
+    
+    resources.forEach(resourcePath => {
+      const category = resourcePath.split('/')[0];
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+    });
+
+    const breakdown = Array.from(categoryCounts.entries())
+      .filter(([, count]) => count > 0)
+      .map(([category, count]) => `${count} ${category}`)
+      .join(', ');
+    
+    return breakdown || 'No resources';
+  }
+
   private async loadAllRemoteResources() {
     try {
       // Show loading state
@@ -214,11 +239,18 @@ export class DiscoverPanelProvider {
       const items = await this.remoteHatService.queryHats('');
       const localHats = await this.getLocalHats();
       
-      this.remoteResults = items.map(i => ({
-        id: i.id,
-        label: i.name,
-        description: i.description,
-        isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+      this.remoteResults = await Promise.all(items.map(async i => {
+        // Get full hat data to calculate resource breakdown
+        const fullHat = await this.remoteHatService.getHat(i.id);
+        const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
+        
+        return {
+          id: i.id,
+          label: i.name,
+          description: i.description,
+          resourceBreakdown,
+          isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+        };
       }));
       this._update();
     } catch (error) {
@@ -746,24 +778,34 @@ export class DiscoverPanelProvider {
       </div>
     ` : currentResults.map((r: DiscoverResult) => `
       <div class="result" data-id="${escape(r.id)}">
-        <div class="result-header">
-          <div class="title">${escape(r.label)}</div>
-          ${r.isPulled ? '<div class="status-badge pulled">Already Downloaded</div>' : ''}
-          ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
-        </div>
-        ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
-        <div class="actions">
-          ${this.activeTab === 'remote' ? 
-            `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
-              ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
-            </button>` :
-            `<button data-action="apply-workspace" data-id="${escape(r.id)}" ${!hasWorkspace ? 'disabled' : ''}>
-              Apply to Workspace
-            </button>
-            <button data-action="apply-user" data-id="${escape(r.id)}">
-              Apply to User
-            </button>`
-          }
+        <div class="result-content">
+          <div class="result-main">
+            <div class="result-header">
+              <div class="title">${escape(r.label)}</div>
+              ${r.isPulled ? '<div class="status-badge pulled">Already Downloaded</div>' : ''}
+              ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
+            </div>
+            ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
+            ${r.resourceBreakdown ? `
+              <div class="resource-breakdown">
+                <span class="breakdown-label">Resources:</span>
+                <span class="breakdown-content">${escape(r.resourceBreakdown)}</span>
+              </div>
+            ` : ''}
+          </div>
+          <div class="actions">
+            ${this.activeTab === 'remote' ? 
+              `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
+                ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
+              </button>` :
+              `<button data-action="apply-workspace" data-id="${escape(r.id)}" ${!hasWorkspace ? 'disabled' : ''}>
+                Apply to Workspace
+              </button>
+              <button data-action="apply-user" data-id="${escape(r.id)}">
+                Apply to User
+              </button>`
+            }
+          </div>
         </div>
       </div>
     `).join('');
@@ -933,16 +975,30 @@ export class DiscoverPanelProvider {
             border-color: var(--vscode-focusBorder);
         }
         
+        .result-content {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .result-main {
+            flex: 1;
+            min-width: 0; /* Allow content to shrink */
+        }
+        
         .result-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
             margin-bottom: 4px;
         }
         
         .result .title {
             font-weight: 600;
             font-size: 14px;
+            flex: 1;
+            min-width: 0; /* Allow title to wrap */
         }
         
         .status-badge {
@@ -966,18 +1022,61 @@ export class DiscoverPanelProvider {
         .result .desc {
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             line-height: 1.4;
+        }
+        
+        .resource-breakdown {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            margin-bottom: 8px;
+            padding: 4px 8px;
+            background: var(--vscode-editorWidget-background);
+            border-radius: 3px;
+            border-left: 2px solid var(--vscode-focusBorder);
+        }
+        
+        .breakdown-label {
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        
+        .breakdown-content {
+            font-style: italic;
         }
         
         .result .actions {
             display: flex;
-            gap: 8px;
+            flex-direction: column;
+            gap: 6px;
+            flex-shrink: 0;
+            align-items: flex-end;
         }
         
         .result .actions button {
             padding: 6px 12px;
             font-size: 12px;
+            white-space: nowrap;
+            min-width: 120px;
+        }
+        
+        /* Responsive behavior for smaller screens */
+        @media (max-width: 600px) {
+            .result-content {
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .result .actions {
+                flex-direction: row;
+                align-items: center;
+                align-self: stretch;
+            }
+            
+            .result .actions button {
+                flex: 1;
+                min-width: unset;
+            }
         }
         
         .empty {

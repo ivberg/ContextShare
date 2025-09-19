@@ -69,14 +69,13 @@ export class RemoteHatService {
       const hats: RemoteHatSummary[] = [];
       const categories = ['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp'];
 
-      // For each category, get the index and create category-based hats
+      // For each category, get the index
       for (const category of categories) {
         try {
           const indexUrl = `${this.baseUrl}/${category}/index.json`;
           const filenames: string[] = await this.makeRequest(indexUrl);
           
           if (filenames && filenames.length > 0) {
-            // Create a category-based hat
             const resourcePaths = filenames.map(filename => `${category}/${filename}`);
 
             // If there are many resources, create smaller themed hats based on filename patterns
