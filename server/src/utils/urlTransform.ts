@@ -65,8 +65,8 @@ function transformAzureDevOpsUrl(url: string): string {
  * @returns Transformed raw URL or original URL if no transformation needed
  */
 function transformGitLabUrl(url: string): string {
-  // Match GitLab blob URLs
-  const gitlabBlobRegex = /^https:\/\/gitlab\.com\/([^\/]+\/[^\/]+)\/-\/blob\/([^\/]+)\/(.+)$/;
+  // Match GitLab blob URLs - supports nested groups/subgroups
+  const gitlabBlobRegex = /^https:\/\/gitlab\.com\/(.+)\/-\/blob\/([^\/]+)\/(.+)$/;
   const match = url.match(gitlabBlobRegex);
   
   if (match) {

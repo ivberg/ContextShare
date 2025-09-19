@@ -152,12 +152,71 @@ api.interceptors.response.use(
 ### Available Scripts
 
 ```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-npm run lint         # Run ESLint
-npm run type-check   # TypeScript type checking
+npm run dev         # Start development server
+npm run build       # Build for production
+npm run start       # Start production server
+npm run lint        # Run ESLint
+npm run typecheck   # TypeScript type checking
+npm test            # Run Jest test suite once
+npm run test:watch  # Run tests in watch mode
+npm run test:ci     # Run tests with coverage (CI)
 ```
+
+## Testing
+
+The web-admin uses **Jest + React Testing Library + MSW (Mock Service Worker)** for a realistic, DOM-focused testing approach.
+
+### Structure
+```
+tests/
+  fixtures/        # Reusable typed fixtures
+  msw/             # Request handlers for mocked API endpoints
+  integration/     # Page-level tests (routing, data loading)
+test/              # Jest setup utilities (setupTests, testServer)
+jest.config.ts
+```
+
+### First Run
+```bash
+npm install
+npm test
+```
+
+### Adding a New API Mock
+1. Add or extend a fixture in `tests/fixtures/`
+2. Add an MSW handler in `tests/msw/handlers.ts`
+3. Write/extend a test importing UI under test
+
+### Guidelines
+- Prefer user-visible assertions (text, roles) over implementation details
+- Mock network at the boundary (MSW) rather than stubbing internals
+- Avoid snapshot tests except for very stable markup
+- Keep fixtures minimal; derive values in test when clarity improves
+
+### Monaco Editor Mocking
+The heavy Monaco component is mocked in `test/setupTests.ts` to keep tests fast.
+
+### Coverage
+Initial global threshold is intentionally low to enable incremental adoption. Raise thresholds as critical paths gain coverage.
+
+### Accessibility Checks (Planned)
+`jest-axe` is installed; add a11y assertions to high-traffic pages gradually.
+
+### Troubleshooting
+| Issue | Tip |
+|-------|-----|
+| Tests hang | Ensure no unhandled promise rejections; check MSW handlers |
+| Module not found | Verify path aliases match `tsconfig.json` + `moduleNameMapper` |
+| act() warnings | Await async UI updates with `waitFor` or `findBy*` queries |
+
+### Example Command Set (CI)
+```bash
+npm ci
+npm run typecheck
+npm run test:ci
+```
+
+Coverage output is emitted to `coverage/` (lcov + text summary).
 
 ### Code Editor Integration
 

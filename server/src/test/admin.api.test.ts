@@ -99,7 +99,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'api-test.instructions.md',
         content: '# API Test\n\nContent here'
       });
@@ -124,7 +124,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'test1.instructions.md',
         content: '# Test 1'
       });
@@ -133,7 +133,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'test2.instructions.md',
         content: '# Test 2'
       });
@@ -163,7 +163,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'read-test.instructions.md',
         content: '# Read Test\n\nThis is test content'
       });
@@ -190,7 +190,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'update-test.instructions.md',
         content: '# Original Content'
       });
@@ -226,7 +226,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         catalogId: catalogId,
-        category: 'instructions',
+        type: 'instructions',
         filename: 'delete-test.instructions.md',
         content: '# Delete Test'
       });
@@ -251,7 +251,7 @@ describe('Admin API', () => {
       .post('/admin/resources')
       .send({
         // Missing required fields
-        category: 'instructions'
+        type: 'instructions'
       });
     
     assert.strictEqual(res.status, 400);
