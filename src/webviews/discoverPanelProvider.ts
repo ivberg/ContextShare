@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { HatService } from '../services/hatService';
 import { RemoteHatService } from '../services/remoteHatService';
 import { Repository } from '../models';
@@ -121,8 +122,10 @@ export class DiscoverPanelProvider {
           case 'discover.action':
             if (message.action === 'activate' && message.id) {
               await this.pullHatToLocal(String(message.id));
-            } else if (message.action === 'apply' && message.id) {
-              await this.applyLocalHat(String(message.id));
+            } else if (message.action === 'apply-workspace' && message.id) {
+              await this.applyLocalHatToWorkspace(String(message.id));
+            } else if (message.action === 'apply-user' && message.id) {
+              await this.applyLocalHatToUser(String(message.id));
             }
             break;
         }
@@ -267,7 +270,140 @@ export class DiscoverPanelProvider {
     }
   }
 
-  private async applyLocalHat(id: string) {
+  private async applyLocalHatToWorkspace(id: string) {
+    try {
+      if (!this.localRepo) {
+        vscode.window.showWarningMessage('No local repository available to apply hat.');
+        return;
+      }
+
+      // Check if workspace is available
+      if (!vscode.workspace.workspaceFolders?.length) {
+        vscode.window.showWarningMessage('No workspace is open. Please open a folder or workspace first.');
+        return;
+      }
+
+      // Find the local hat by ID
+      const localHats = await this.hatService.discoverLocalHats();
+      const hat = localHats.find(h => h.id === id);
+      
+      if (!hat) {
+        vscode.window.showWarningMessage('Local hat not found.');
+        return;
+      }
+
+      // Show confirmation
+      const choice = await vscode.window.showInformationMessage(
+        `Apply hat "${hat.name}" to workspace?`,
+        { 
+          detail: `This will copy ${hat.resources.length} resources from the local repository to your workspace's .github or .vscode directory (as appropriate for each resource type).`,
+          modal: true 
+        },
+        'Apply to Workspace', 'Cancel'
+      );
+      
+      if (choice !== 'Apply to Workspace') {
+        return;
+      }
+
+      // Create a temporary "virtual" catalog repository pointing to the local repo
+      // so we can use the existing resource activation infrastructure
+      const virtualRepo = {
+        id: 'local-virtual',
+        name: 'Local Virtual',
+        rootPath: this.localRepo.rootPath,
+        catalogPath: path.join(this.localRepo.rootPath, 'catalog'),
+        runtimePath: path.join(this.localRepo.rootPath, '.github'),
+        isActive: true
+      };
+
+      // Import necessary modules
+      const { ResourceService } = await import('../services/resourceService');
+      const { FileService } = await import('../services/fileService');
+      const { ResourceCategory, ResourceState } = await import('../models');
+
+      // Create service instances
+      const fileService = new FileService();
+      const resourceService = new ResourceService(fileService);
+      
+      // Configure to target current workspace
+      const currentWorkspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      resourceService.setCurrentWorkspaceRoot(currentWorkspace);
+
+      // Discover resources from the local catalog
+      const allResources = await resourceService.discoverResources(virtualRepo);
+      
+      // Find resources that match the hat's resource list
+      const resourcesToActivate = [];
+      const missingResources = [];
+
+      for (const relativePath of hat.resources) {
+        const normalizedPath = relativePath.replace(/\\/g, '/');
+        const resource = allResources.find(r => 
+          r.relativePath.replace(/\\/g, '/') === normalizedPath
+        );
+        
+        if (resource) {
+          resourcesToActivate.push(resource);
+        } else {
+          missingResources.push(relativePath);
+        }
+      }
+
+      if (missingResources.length > 0) {
+        const shouldContinue = await vscode.window.showWarningMessage(
+          `Some resources from the hat were not found: ${missingResources.join(', ')}`,
+          { modal: true },
+          'Continue with Available Resources', 'Cancel'
+        );
+        
+        if (shouldContinue !== 'Continue with Available Resources') {
+          return;
+        }
+      }
+
+      // Activate the resources
+      let activatedCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      for (const resource of resourcesToActivate) {
+        try {
+          const result = await resourceService.activateResource(resource);
+          if (result.success) {
+            activatedCount++;
+          } else {
+            errorCount++;
+            errors.push(`${resource.relativePath}: ${result.message}`);
+          }
+        } catch (error: any) {
+          errorCount++;
+          errors.push(`${resource.relativePath}: ${error?.message || 'Unknown error'}`);
+        }
+      }
+
+      // Show results
+      if (errorCount === 0) {
+        vscode.window.showInformationMessage(
+          `Successfully applied hat "${hat.name}" to workspace! Activated ${activatedCount} resources.`
+        );
+      } else {
+        const message = `Applied hat "${hat.name}" with some issues. Activated: ${activatedCount}, Failed: ${errorCount}`;
+        if (errors.length > 0) {
+          console.error('Hat application errors:', errors);
+        }
+        vscode.window.showWarningMessage(message);
+      }
+      
+      // Refresh the webview
+      this._update();
+      
+    } catch (e: any) {
+      vscode.window.showErrorMessage('Failed to apply hat to workspace: ' + (e?.message || e));
+    }
+  }
+
+  private async applyLocalHatToUser(id: string) {
     try {
       if (!this.localRepo) {
         vscode.window.showWarningMessage('No local repository available to apply hat.');
@@ -285,19 +421,25 @@ export class DiscoverPanelProvider {
 
       // Show confirmation and apply the hat
       const choice = await vscode.window.showInformationMessage(
-        `Apply hat "${hat.name}"?`,
-        { detail: hat.description || 'This will activate the resources defined in this hat.' },
-        'Apply', 'Cancel'
+        `Apply hat "${hat.name}" to user settings?`,
+        { 
+          detail: `This will save the hat to your global user settings. Implementation coming soon!`,
+          modal: true 
+        },
+        'Apply to User', 'Cancel'
       );
       
-      if (choice === 'Apply') {
-        vscode.window.showInformationMessage(`Applied hat "${hat.name}" successfully.`);
-        // Refresh the webview to update status
+      if (choice === 'Apply to User') {
+        // TODO: Implement user hat application
+        // For now, just show a message that this is coming soon
+        vscode.window.showInformationMessage(`Hat "${hat.name}" user application coming soon!`);
+        
+        // Refresh the webview
         this._update();
       }
       
     } catch (e: any) {
-      vscode.window.showErrorMessage('Failed to apply hat: ' + (e?.message || e));
+      vscode.window.showErrorMessage('Failed to apply hat to user settings: ' + (e?.message || e));
     }
   }
 
@@ -325,6 +467,8 @@ export class DiscoverPanelProvider {
     const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c] || c));
 
     const currentResults = this.activeTab === 'remote' ? this.remoteResults : this.localResults;
+    const hasWorkspace = !!vscode.workspace.workspaceFolders?.length;
+    
     const resultsHtml = currentResults.length === 0 ? `
       <div class="empty">
         ${this.lastQuery ? `No results found for "${escape(this.lastQuery)}". Try a different search term.` : 
@@ -343,7 +487,12 @@ export class DiscoverPanelProvider {
             `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
               ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
             </button>` :
-            `<button data-action="apply" data-id="${escape(r.id)}">Apply Hat</button>`
+            `<button data-action="apply-workspace" data-id="${escape(r.id)}" ${!hasWorkspace ? 'disabled' : ''}>
+              Apply to Workspace
+            </button>
+            <button data-action="apply-user" data-id="${escape(r.id)}">
+              Apply to User
+            </button>`
           }
         </div>
       </div>
