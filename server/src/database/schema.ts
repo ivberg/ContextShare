@@ -22,12 +22,16 @@ export interface CatalogTable {
 export interface ResourceTable {
   id: Generated<number>;
   catalog_id: number;
-  category: 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp';
+  type: 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp';
   filename: string;
   title: string | null;
   description: string | null;
-  content: string;             // The actual file content
+  category: string | null;         // Domain/technology category (web-development, cloud, database, etc.)
+  tags: string | null;             // Comma-separated searchable tags (react,typescript,beginner)
+  content: string;             // The actual file content (for content type resources)
   content_type: string;        // MIME type or file extension
+  resource_type: 'content' | 'url'; // Type of resource: stored content or URL reference
+  content_url: string | null;  // URL for url type resources
   metadata: string | null;     // JSON metadata
   enabled: number; // SQLite stores booleans as integers (0/1)
   created_at: Generated<Date>;

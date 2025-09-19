@@ -133,7 +133,13 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
       const data = Buffer.isBuffer(buf) ? buf.toString('utf8') : buf;
       res.setHeader('Content-Type', inferContentType(file));
       res.send(data);
-    } catch (e){ next(e); }
+    } catch (e: any) { 
+      // Handle URL-based resources with redirect
+      if (e.code === 'redirect_to_url') {
+        return res.redirect(302, e.url);
+      }
+      next(e); 
+    }
   });
 
   // 404 handler for catalog namespace (only if previous handlers didn't match)

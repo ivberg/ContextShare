@@ -50,6 +50,8 @@ export default function ResourceEditPage() {
 
   const [resource, setResource] = useState<ResourceContent | null>(null);
   const [content, setContent] = useState('');
+  const [contentUrl, setContentUrl] = useState('');
+  const [resourceType, setResourceType] = useState<'content' | 'url'>('content');
   const [metadata, setMetadata] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,7 +72,13 @@ export default function ResourceEditPage() {
         
         const resourceData = await resourceApi.getContent(catalogId, category, filename);
         setResource(resourceData);
-        setContent(resourceData.content);
+        setResourceType(resourceData.resource_type);
+        
+        if (resourceData.resource_type === 'content') {
+          setContent(resourceData.content || '');
+        } else {
+          setContentUrl(resourceData.content_url || '');
+        }
         
         // Parse metadata if it exists
         if (resourceData.metadata) {
@@ -111,10 +119,23 @@ export default function ResourceEditPage() {
         }
       }
 
-      await resourceApi.update(catalogId, category, filename, {
-        content,
+      const updateData: {
+        resourceType: 'content' | 'url';
+        metadata?: Record<string, unknown>;
+        content?: string;
+        contentUrl?: string;
+      } = {
+        resourceType,
         metadata: parsedMetadata,
-      });
+      };
+
+      if (resourceType === 'content') {
+        updateData.content = content;
+      } else {
+        updateData.contentUrl = contentUrl;
+      }
+
+      await resourceApi.update(catalogId, category, filename, updateData);
 
       setSuccess('Resource updated successfully');
       
@@ -283,6 +304,11 @@ export default function ResourceEditPage() {
             </div>
             
             <div>
+              <p className="text-sm font-medium text-gray-700">Resource Type</p>
+              <p className="mt-1 text-sm text-gray-600 capitalize">{resource.resource_type}</p>
+            </div>
+            
+            <div>
               <p className="text-sm font-medium text-gray-700">Content Type</p>
               <p className="mt-1 text-sm text-gray-600">{resource.content_type}</p>
             </div>
@@ -304,18 +330,73 @@ export default function ResourceEditPage() {
         </div>
       )}
 
-      {/* Content Editor */}
-      <div className="mb-6">
-        <div className="rounded-lg bg-white p-6 shadow">
-          <h2 className="mb-4 text-lg font-medium text-gray-900">Content</h2>
-          <CodeEditor
-            value={content}
-            onChange={(value) => setContent(value || '')}
-            language={language}
-            height="500px"
-          />
-        </div>
+      {/* Resource Type Toggle */}
+      <div className="mb-6 rounded-lg bg-white p-6 shadow">
+        <h2 className="mb-4 text-lg font-medium text-gray-900">Resource Type</h2>
+        <select
+          value={resourceType}
+          onChange={(e) => setResourceType(e.target.value as 'content' | 'url')}
+          className="block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="content">Content (stored locally)</option>
+          <option value="url">URL (external reference)</option>
+        </select>
+        <p className="mt-1 text-xs text-gray-500">
+          Choose whether to store content directly or reference an external URL
+        </p>
       </div>
+
+      {/* Content Editor for content-type resources */}
+      {resourceType === 'content' && (
+        <div className="mb-6">
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-lg font-medium text-gray-900">Content</h2>
+            <CodeEditor
+              value={content}
+              onChange={(value) => setContent(value || '')}
+              language={language}
+              height="500px"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* URL Editor for url-type resources */}
+      {resourceType === 'url' && (
+        <div className="mb-6">
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-lg font-medium text-gray-900">External URL</h2>
+            <div>
+              <label htmlFor="contentUrl" className="block text-sm font-medium text-gray-700">
+                Resource URL
+              </label>
+              <input
+                type="url"
+                id="contentUrl"
+                value={contentUrl}
+                onChange={(e) => setContentUrl(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="https://github.com/github/awesome-copilot/blob/main/instructions/blazor.instructions.md"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Enter the URL to the external resource. GitHub URLs will be automatically converted to raw content URLs.
+              </p>
+              {contentUrl && (
+                <div className="mt-3">
+                  <a
+                    href={contentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center text-sm text-blue-600 hover:text-blue-500"
+                  >
+                    View External Resource →
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metadata Editor */}
       <div>

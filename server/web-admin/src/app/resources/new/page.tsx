@@ -94,6 +94,20 @@ const getLanguageForCategory = (category: ResourceCategory): string => {
   }
 };
 
+// Helper function to transform GitHub URLs to raw content URLs
+const transformGitHubUrl = (url: string): string => {
+  // Transform github.com/user/repo/blob/branch/path to raw.githubusercontent.com/user/repo/branch/path
+  const githubBlobRegex = /^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/;
+  const match = url.match(githubBlobRegex);
+  
+  if (match) {
+    const [, owner, repo, branch, path] = match;
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  }
+  
+  return url; // Return original URL if no transformation needed
+};
+
 function NewResourceForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -109,12 +123,16 @@ function NewResourceForm() {
     category: ResourceCategory;
     filename: string;
     content: string;
+    contentUrl: string;
+    resourceType: 'content' | 'url';
     metadata: string;
   }>({
     catalogId: '',
     category: 'instructions',
     filename: '',
     content: '',
+    contentUrl: '',
+    resourceType: 'content',
     metadata: '',
   });
 
@@ -141,12 +159,12 @@ function NewResourceForm() {
           setFormData(prev => ({ 
             ...prev, 
             category: categoryParam,
-            content: getDefaultContentForCategory(categoryParam, 'new-resource')
+            content: prev.resourceType === 'content' ? getDefaultContentForCategory(categoryParam, 'new-resource') : '',
           }));
         } else {
           setFormData(prev => ({ 
             ...prev, 
-            content: getDefaultContentForCategory('instructions', 'new-resource')
+            content: prev.resourceType === 'content' ? getDefaultContentForCategory('instructions', 'new-resource') : '',
           }));
         }
         
@@ -176,7 +194,7 @@ function NewResourceForm() {
         ...prev,
         category: newCategory,
         filename: newFilename,
-        content: getDefaultContentForCategory(newCategory, newFilename || 'new-resource'),
+        content: prev.resourceType === 'content' ? getDefaultContentForCategory(newCategory, newFilename || 'new-resource') : '',
       }));
     } else if (name === 'filename') {
       const baseFilename = value.replace(/\.[^.]+$/, ''); // Remove any extension
@@ -185,6 +203,14 @@ function NewResourceForm() {
       setFormData(prev => ({
         ...prev,
         filename: newFilename,
+      }));
+    } else if (name === 'resourceType') {
+      const newResourceType = value as 'content' | 'url';
+      setFormData(prev => ({
+        ...prev,
+        resourceType: newResourceType,
+        content: newResourceType === 'content' ? getDefaultContentForCategory(prev.category, prev.filename || 'new-resource') : '',
+        contentUrl: newResourceType === 'url' ? '' : prev.contentUrl,
       }));
     } else {
       setFormData(prev => ({
@@ -197,8 +223,18 @@ function NewResourceForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.catalogId || !formData.filename.trim() || !formData.content.trim()) {
+    if (!formData.catalogId || !formData.filename.trim()) {
       setError('Please fill in all required fields');
+      return;
+    }
+    
+    if (formData.resourceType === 'content' && !formData.content.trim()) {
+      setError('Content is required for content-type resources');
+      return;
+    }
+    
+    if (formData.resourceType === 'url' && !formData.contentUrl.trim()) {
+      setError('Content URL is required for URL-type resources');
       return;
     }
     
@@ -220,8 +256,15 @@ function NewResourceForm() {
         catalogId: formData.catalogId as number,
         category: formData.category,
         filename: formData.filename,
-        content: formData.content,
+        resourceType: formData.resourceType,
       };
+      
+      if (formData.resourceType === 'content') {
+        createRequest.content = formData.content;
+      } else {
+        // Transform GitHub URLs to raw content URLs for better performance
+        createRequest.contentUrl = transformGitHubUrl(formData.contentUrl);
+      }
       
       if (parsedMetadata) {
         createRequest.metadata = parsedMetadata;
@@ -346,6 +389,26 @@ function NewResourceForm() {
             </div>
 
             <div className="lg:col-span-2">
+              <label htmlFor="resourceType" className="block text-sm font-medium text-gray-700">
+                Resource Type *
+              </label>
+              <select
+                id="resourceType"
+                name="resourceType"
+                required
+                value={formData.resourceType}
+                onChange={handleInputChange}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="content">Content (stored locally)</option>
+                <option value="url">URL (external reference)</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Choose whether to store content directly or reference an external URL
+              </p>
+            </div>
+
+            <div className="lg:col-span-2">
               <label htmlFor="filename" className="block text-sm font-medium text-gray-700">
                 Filename *
               </label>
@@ -366,15 +429,41 @@ function NewResourceForm() {
           </div>
         </div>
 
-        <div className="rounded-lg bg-white p-6 shadow">
-          <h2 className="mb-4 text-lg font-medium text-gray-900">Content *</h2>
-          <CodeEditor
-            value={formData.content}
-            onChange={(value) => setFormData(prev => ({ ...prev, content: value || '' }))}
-            language={getLanguageForCategory(formData.category)}
-            height="400px"
-          />
-        </div>
+        {formData.resourceType === 'url' && (
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-lg font-medium text-gray-900">External URL *</h2>
+            <div>
+              <label htmlFor="contentUrl" className="block text-sm font-medium text-gray-700">
+                Resource URL
+              </label>
+              <input
+                type="url"
+                id="contentUrl"
+                name="contentUrl"
+                required={formData.resourceType === 'url'}
+                value={formData.contentUrl}
+                onChange={handleInputChange}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="https://github.com/github/awesome-copilot/blob/main/instructions/blazor.instructions.md"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Enter the URL to the external resource. GitHub URLs will be automatically converted to raw content URLs.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {formData.resourceType === 'content' && (
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-lg font-medium text-gray-900">Content *</h2>
+            <CodeEditor
+              value={formData.content}
+              onChange={(value) => setFormData(prev => ({ ...prev, content: value || '' }))}
+              language={getLanguageForCategory(formData.category)}
+              height="400px"
+            />
+          </div>
+        )}
 
         <div className="rounded-lg bg-white p-6 shadow">
           <h2 className="mb-4 text-lg font-medium text-gray-900">Metadata (JSON)</h2>

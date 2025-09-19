@@ -26,12 +26,16 @@ export interface CreateCatalogRequest {
 export interface Resource {
   id: number;
   catalog_id: number;
-  category: ResourceCategory;
+  type: ResourceType;
   filename: string;
   title?: string;
   description?: string;
+  category?: string; // Domain/technology category (web-development, cloud, database, etc.)
+  tags?: string;     // Comma-separated searchable tags (react,typescript,beginner)
   content: string;
   content_type: string;
+  resource_type: 'content' | 'url';
+  content_url?: string;
   metadata?: string; // JSON string
   enabled: number;
   created_at: string;
@@ -40,26 +44,40 @@ export interface Resource {
 
 export interface CreateResourceRequest {
   catalogId: number;
-  category: ResourceCategory;
+  type: ResourceType;
   filename: string;
-  content: string;
+  title?: string;
+  description?: string;
+  category?: string;  // Domain/technology category
+  tags?: string;      // Comma-separated tags
+  content?: string;
+  contentUrl?: string;
+  resourceType: 'content' | 'url';
   metadata?: Record<string, unknown>;
 }
 
 export interface UpdateResourceRequest {
-  content: string;
+  title?: string;
+  description?: string;
+  category?: string;   // Domain/technology category
+  tags?: string;       // Comma-separated tags
+  content?: string;
+  contentUrl?: string;
+  resourceType?: 'content' | 'url';
   metadata?: Record<string, unknown>;
 }
 
 export interface ResourceContent {
-  content: string;
+  content?: string;
   content_type: string;
+  resource_type: 'content' | 'url';
+  content_url?: string;
   metadata?: string;
   title?: string;
   description?: string;
 }
 
-export type ResourceCategory = 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp';
+export type ResourceType = 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp';
 
 export interface ApiResponse<T> {
   data?: T;

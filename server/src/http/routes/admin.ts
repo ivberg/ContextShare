@@ -9,15 +9,43 @@ import { LruCache } from '../../cache/lru';
 // Validation schemas
 const createResourceSchema = z.object({
   catalogId: z.number().int().positive(),
-  category: z.enum(['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp']),
+  type: z.enum(['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp']),
   filename: z.string().min(1).max(255),
-  content: z.string().min(1),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  category: z.string().optional(), // Domain/technology category
+  tags: z.string().optional(), // Comma-separated tags
+  content: z.string().optional(),
+  contentUrl: z.string().url().optional(),
+  resourceType: z.enum(['content', 'url']).default('content'),
   metadata: z.record(z.any()).optional(),
+}).refine((data) => {
+  if (data.resourceType === 'content' && !data.content) {
+    return false;
+  }
+  if (data.resourceType === 'url' && !data.contentUrl) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Content is required for content resources, contentUrl is required for URL resources"
 });
 
 const updateResourceSchema = z.object({
-  content: z.string().min(1),
+  content: z.string().optional(),
+  contentUrl: z.string().url().optional(),
+  resourceType: z.enum(['content', 'url']).optional(),
   metadata: z.record(z.any()).optional(),
+}).refine((data) => {
+  if (data.resourceType === 'content' && !data.content) {
+    return false;
+  }
+  if (data.resourceType === 'url' && !data.contentUrl) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Content is required for content resources, contentUrl is required for URL resources"
 });
 
 const createCatalogSchema = z.object({
@@ -136,31 +164,58 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
     try {
       const data = createResourceSchema.parse(req.body);
       
-      await catalogProvider.create(
-        data.catalogId,
-        data.category,
-        data.filename,
-        data.content,
-        data.metadata
-      );
+      if (!catalogProvider.create) {
+        return res.status(501).json({ error: 'Resource creation not supported in current mode' });
+      }
+
+      if (data.resourceType === 'content') {
+        await catalogProvider.create(
+          data.catalogId,
+          data.type,
+          data.filename,
+          data.content!,
+          data.metadata,
+          'content',
+          undefined,
+          data.title,
+          data.description,
+          data.category,
+          data.tags
+        );
+      } else {
+        await catalogProvider.create(
+          data.catalogId,
+          data.type,
+          data.filename,
+          undefined as never,
+          data.metadata,
+          'url',
+          data.contentUrl!,
+          data.title,
+          data.description,
+          data.category,
+          data.tags
+        );
+      }
 
       // Fetch the created resource to return complete data
       const resource = await db
         .selectFrom('resources')
         .selectAll()
         .where('catalog_id', '=', data.catalogId)
-        .where('category', '=', data.category as any)
+        .where('type', '=', data.type as 'chatmodes' | 'instructions' | 'prompts' | 'tasks' | 'mcp')
         .where('filename', '=', data.filename)
         .executeTakeFirstOrThrow();
 
       logger.info({ 
         catalogId: data.catalogId, 
-        category: data.category, 
-        filename: data.filename 
+        type: data.type, 
+        filename: data.filename,
+        resourceType: data.resourceType
       }, 'Resource created');
       
-      // Invalidate index cache for this category
-      invalidateCache(data.category);
+      // Invalidate index cache for this resource type
+      invalidateCache(data.type);
       
       res.status(201).json(resource);
     } catch (error) {
@@ -186,10 +241,12 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         category,
         filename,
         data.content,
-        data.metadata
+        data.metadata,
+        data.resourceType,
+        data.contentUrl
       );
 
-      logger.info({ catalogId, category, filename }, 'Resource updated');
+      logger.info({ catalogId, category, filename, resourceType: data.resourceType }, 'Resource updated');
       
       // Invalidate index cache for this category
       invalidateCache(category);
@@ -237,7 +294,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
 
       const resource = await db
         .selectFrom('resources')
-        .select(['content', 'content_type', 'metadata', 'title', 'description'])
+        .select(['content', 'content_type', 'resource_type', 'content_url', 'metadata', 'title', 'description'])
         .where('catalog_id', '=', catalogId)
         .where('category', '=', category as any)
         .where('filename', '=', filename)
@@ -250,6 +307,8 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
       res.json({
         content: resource.content,
         contentType: resource.content_type,
+        resourceType: resource.resource_type,
+        contentUrl: resource.content_url,
         metadata: resource.metadata ? JSON.parse(resource.metadata) : null,
         title: resource.title,
         description: resource.description,
