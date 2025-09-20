@@ -8,19 +8,20 @@ This guide explains how AI agents can analyze resource content and use the Conte
 
 ### ✅ Current Streamlined Workflow (Recommended)
 
-**Overview**: The most effective approach uses the catalog-resource-processor to save content files, then LLM manually analyzes each file and generates proper metadata.
+**Overview**: The most effective approach uses the catalog-resource-processor to automatically discover and extract only new content files, then LLM analyzes each file and generates proper metadata.
 
 #### Step 1: Extract Content Files
 ```bash
 # Run processor to save content files (skips existing resources automatically)
-node scripts/catalog-resource-processor.js "s:\src\awesome-copilot\chatmodes" --batch-size 10
+node scripts/catalog-resource-processor.js "s:\src\awesome-copilot\chatmodes"
 ```
 
 **What this does:**
-- ✅ **Database checking**: Automatically skips existing resources (like beastmode)
+- ✅ **Automatic duplicate detection**: Uses direct database queries to skip existing resources
 - ✅ **Content extraction**: Saves file content to `temp-analysis/` folder  
 - ✅ **No automated analysis**: Just extracts content for LLM review
 - ✅ **Correct URLs**: Generates proper raw GitHub URLs
+- ✅ **No batch limits**: Processes all new files automatically
 
 #### Step 2: LLM Analysis and Metadata Generation
 
@@ -74,12 +75,11 @@ The main script for extracting content files from external repositories. **No lo
 
 **Current Usage** (streamlined):
 ```bash
-# Extract content files for LLM analysis (recommended batch size: 10-20)
-node scripts/catalog-resource-processor.js "s:\src\awesome-copilot\chatmodes" --batch-size 10
+# Extract content files for LLM analysis (processes all new files automatically)
+node scripts/catalog-resource-processor.js "s:\src\awesome-copilot\chatmodes"
 ```
 
 **Key Options:**
-- `--batch-size <n>`: Number of files to extract content from (default: 10)
 - `--log-level`: `debug`, `info`, `warn`, `error`
 
 **Features:**
@@ -372,12 +372,17 @@ This metadata structure enables powerful search and discovery while keeping the 
 ⚠️ **Note**: Full API testing requires implementing missing SqliteCatalogProvider methods first.
 
 ```bash
-# 1. Set environment variables
+# 1. Verify server is running
+curl http://localhost:3000/healthz
+
+# 2. If health check passes, proceed directly to step 3
+# If health check fails, set environment variables and start server:
 $env:MODE = "database"
 $env:DATABASE_PATH = "./catalog.db"
 $env:CONTEXTSHARE_API_KEY = "admin-key"
+npm start
 
-# 2. Test with a single resource (will fail until API is fixed)
+# 3. Test with a single resource (will fail until API is fixed)
 node scripts/insert-to-db.js your-metadata.json
 ```
 
@@ -423,158 +428,20 @@ created_at TEXT
 updated_at TEXT
 ```
 
-### Streamlined Existence Check Method
+### Streamlined Processing Approach
 
-**Recommended Approach**: Check if resources already exist in the database BEFORE reading file content or performing expensive analysis.
-
-#### Method 1: Direct Database Query (Most Efficient)
-
-Use the built-in `db-query` tool to directly check for existing resources:
+**Recommended Approach**: Use the catalog-resource-processor.js script which automatically handles existence checking and only extracts content from new files.
 
 ```bash
-# Check for specific resource by filename pattern
-npx tsx src/tools/db-query.ts "SELECT id, type, filename, title, content_url FROM resources WHERE filename LIKE '%Beast%'"
-
-# Check for specific resource by URL pattern  
-npx tsx src/tools/db-query.ts "SELECT id, type, filename, title, content_url FROM resources WHERE content_url LIKE '%awesome-copilot%' AND filename = 'accesibility.chatmode.md'"
-
-# Check for multiple patterns at once
-npx tsx src/tools/db-query.ts "SELECT id, type, filename, title, content_url FROM resources WHERE filename LIKE '%accessibility%' OR filename LIKE '%accesibility%'"
+# The script automatically checks database and only processes new files
+node scripts/catalog-resource-processor.js "s:\src\awesome-copilot\prompts"
 ```
 
 **Benefits:**
-- ⚡ **Ultra-fast**: No file I/O or network requests
-- 🎯 **Precise**: Direct database lookup with SQL patterns
-- 🔍 **Flexible**: Support for partial matches, multiple patterns
-- 📊 **Informative**: Returns complete resource metadata
-
-#### Method 2: Batch Existence Check Script
-
-For processing multiple files, create a dedicated existence check script:
-
-```javascript
-// scripts/batch-existence-check.js
-const files = [
-  's:/src/awesome-copilot/chatmodes/4.1-Beast.chatmode.md',
-  's:/src/awesome-copilot/chatmodes/accesibility.chatmode.md', 
-  's:/src/awesome-copilot/chatmodes/api-architect.chatmode.md'
-];
-
-for (const file of files) {
-  // Query database for each file
-  // Skip existing, queue non-existing for processing
-}
-```
-
-#### Example Workflow Results
-
-✅ **First File Check**: `4.1-Beast.chatmode.md`
-```sql
-SELECT results: 1 row found
-┌─────────┬────┬─────────────┬─────────────────────────┬──────────────────────┐
-│ (index) │ id │ type        │ filename                │ title                │
-├─────────┼────┼─────────────┼─────────────────────────┼──────────────────────┤
-│ 0       │ 1  │ 'chatmodes' │ '4.1-Beast.chatmode.md' │ '4.1 Beast.Chatmode' │
-└─────────┴────┴─────────────┴─────────────────────────┴──────────────────────┘
-```
-**Result**: ✅ EXISTS - Skip file, no processing needed
-
-❌ **Second File Check**: `accesibility.chatmode.md`
-```sql
-SELECT results: No results found.
-0 row(s) returned.
-```
-**Result**: ❌ NOT FOUND - Proceed with content analysis and processing
-
-##### Practical Example: awesome-copilot Processing
-
-**Real-world example** of streamlined existence checking:
-
-```bash
-# Step 1: Check first file (4.1-Beast.chatmode.md)
-npx tsx src/tools/db-query.ts "SELECT id, type, filename, title, content_url FROM resources WHERE filename LIKE '%Beast%' OR content_url LIKE '%Beast%' OR title LIKE '%Beast%'"
-
-# Result: ✅ Found existing resource (ID: 1) - SKIP
-# Filename: '4.1-Beast.chatmode.md'  
-# Title: '4.1 Beast.Chatmode'
-# URL: 'https://raw.githubusercontent.com/github/awesome-copilot/refs/heads/main/chatmodes/4.1-Beast.chatmode.md'
-
-# Step 2: Check second file (accesibility.chatmode.md) 
-npx tsx src/tools/db-query.ts "SELECT id, type, filename, title, content_url FROM resources WHERE filename LIKE '%accessibility%' OR filename LIKE '%accesibility%' OR content_url LIKE '%accessibility%' OR content_url LIKE '%accesibility%'"
-
-# Result: ❌ No results found - PROCESS
-# Continue with content analysis and API submission
-```
-
-**Processing Decision Tree:**
-- 🟢 **Exists**: Log "SKIPPING - already in catalog" → move to next file
-- 🔴 **Not Found**: Proceed with content analysis → generate metadata → submit to API
-
-**Time Savings:** ~95% reduction in processing time for existing resources by avoiding unnecessary file reads and analysis.
-
-### Performance Comparison
-
-| Method | Time | I/O Operations | Use Case |
-|--------|------|----------------|----------|
-| **Streamlined DB Query** | ~5ms | 1 SQL query | ✅ Recommended for all cases |
-| HTTP API Check | ~200ms | HTTP request + JSON parsing | ⚠️ Only if API required |
-| File-then-check | ~50ms | File read + HTTP/DB | ❌ Inefficient, avoid |
-
-#### Best Practices for Existence Checking
-
-1. **Use Pattern Matching**: Include multiple variations to catch different filename formats
-   ```sql
-   -- Good: Catches multiple variations
-   WHERE filename LIKE '%accessibility%' OR filename LIKE '%accesibility%'
-   
-   -- Better: Include URL patterns for remote sources
-   WHERE filename LIKE '%Beast%' OR content_url LIKE '%Beast%' OR title LIKE '%Beast%'
-   ```
-
-2. **Batch Multiple Checks**: Group related checks into single queries when possible
-   ```sql
-   -- Efficient: Check multiple files at once
-   WHERE filename IN ('file1.md', 'file2.md', 'file3.md')
-   ```
-
-3. **Log Results Clearly**: Always log the decision made for each file
-   ```bash
-   ✅ SKIPPING: 4.1-Beast.chatmode.md (already exists - ID: 1)
-   ❌ PROCESSING: accesibility.chatmode.md (not found in database)
-   ```
-
-#### Troubleshooting Existence Checks
-
-**Issue**: Database not found
-```
-Error: ENOENT: no such file or directory, open './catalog.db'
-```
-**Solution**: Ensure you're in the server directory and database exists
-```bash
-cd server
-ls -la catalog.db  # Verify database file exists
-```
-
-**Issue**: TypeScript execution errors
-```
-Error: Cannot find module 'tsx'
-```
-**Solution**: Install tsx or use alternative method
-```bash
-npm install -g tsx
-# OR use node with compiled JS
-npm run build && node dist/tools/db-query.js
-```
-
-**Issue**: Empty results when resource should exist
-```
-0 row(s) returned
-```
-**Solution**: Check for typos in patterns, verify actual database content
-```sql
--- Debug: List all resources to see what's actually there
-SELECT filename, title FROM resources LIMIT 10;
-```
+- ⚡ **Ultra-fast**: Built-in database queries skip existing resources
+- 🎯 **Precise**: Direct database lookup with filename and URL matching  
+- 🔍 **Comprehensive**: Handles all files in directory automatically
+- 📊 **Informative**: Shows which files are skipped vs processed
 
 ### Common API Issues
 
@@ -582,7 +449,7 @@ SELECT filename, title FROM resources LIMIT 10;
    ```
    Error: connect ECONNREFUSED ::1:3000
    ```
-   **Solution**: Start the server with `npm start` in database mode
+   **Solution**: Check server health with `curl http://localhost:3000/healthz`. If it fails, start the server with `npm start` in database mode
 
 2. **Wrong Endpoint**
    ```

@@ -13,6 +13,8 @@ import { LruCache } from '../cache/lru';
 import { requestId } from './middleware/requestId';
 import { authGuard } from './middleware/authGuard';
 import { createAdminRoutes } from './routes/admin';
+import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '../../../shared/catalogExportTypes';
+import type { Catalog } from '../database/schema';
 
 // Factory function to create the appropriate catalog provider
 function createProvider(config: ServerConfig, dbService?: DatabaseService): CatalogProvider {
@@ -105,6 +107,115 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
 
   app.get('/healthz', (_req, res) => {
     res.json({ status: 'ok', mode: config.mode });
+  });
+
+  // GET /catalog/catalog-export - Aggregate all catalogs with resources
+  app.get('/catalog/catalog-export', async (_req: Request, res: Response, next: NextFunction) => {
+    // Only works in database mode
+    if (config.mode !== 'database' && config.mode !== 'hybrid') {
+      return res.status(404).json({ error: 'not_available_in_file_mode' });
+    }
+    if (!opts.dbService) {
+      return res.status(503).json({ error: 'database_service_unavailable' });
+    }
+
+    try {
+      const db = opts.dbService.getKysely();
+      type CatalogMap = Record<number, CatalogExport>;
+      // Fetch all catalogs
+      const catalogs = await db
+        .selectFrom('catalogs')
+        .selectAll()
+  .where('enabled', '=', 1)
+        .execute();
+
+      if (catalogs.length === 0) {
+        return res.json({ generated_at: new Date().toISOString(), catalogs: [], counts: { catalogs: 0, resources: 0 } });
+      }
+
+      // Fetch all resources for these catalogs in one query
+      const catalogIds = catalogs.map((c: Catalog) => c.id);
+      const resources = await db
+        .selectFrom('resources')
+        .selectAll()
+  .where('catalog_id', 'in', catalogIds)
+  .where('enabled', '=', 1)
+        .execute();
+
+      // Size guard: limit to 10,000 resources to protect server memory
+      if (resources.length > 10_000) {
+        return res.status(413).json({ error: 'export_too_large', max: 10000 });
+      }
+
+      // Group resources by catalog and type
+  const byCatalog: CatalogMap = {};
+      for (const cat of catalogs) {
+        byCatalog[cat.id] = {
+          // id intentionally omitted for lightweight export
+          name: cat.name,
+          display_name: cat.display_name,
+          description: cat.description,
+          source_type: cat.source_type,
+          source_path: cat.source_path ?? undefined,
+          source_url: cat.source_url ?? undefined,
+          // enabled always filtered to 1 so omitted
+          created_at: cat.created_at,
+          updated_at: cat.updated_at,
+          resources: {
+            chatmodes: [],
+            instructions: [],
+            prompts: [],
+            tasks: [],
+            mcp: []
+          }
+        };
+      }
+
+      const INLINE_CONTENT_LIMIT = 50 * 1024; // 50KB to avoid huge payloads
+
+      for (const r of resources) {
+        const cat = byCatalog[r.catalog_id];
+        if (!cat) { continue; }
+        // Parse metadata JSON if present
+        let parsedMeta: Record<string, unknown> | null = null;
+        if (r.metadata) {
+          try { parsedMeta = JSON.parse(r.metadata); } catch { parsedMeta = null; }
+        }
+        const summary: ResourceExportSummary = {
+          filename: r.filename,
+          title: r.title ?? undefined,
+          description: r.description ?? undefined,
+          category: r.category ?? undefined,
+          tags: r.tags ?? undefined,
+          content_type: r.content_type,
+          resource_type: r.resource_type,
+          content_url: r.content_url ?? undefined,
+          metadata: parsedMeta ?? undefined,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+          content: (r.resource_type === 'content' && typeof r.content === 'string' && r.content.length <= INLINE_CONTENT_LIMIT) ? r.content : undefined,
+          truncated: (r.resource_type === 'content' && typeof r.content === 'string' && r.content.length > INLINE_CONTENT_LIMIT) ? true : undefined,
+          size: r.resource_type === 'content' ? (typeof r.content === 'string' ? r.content.length : undefined) : undefined
+        };
+        const keyCandidate = r.type as string;
+        if(['chatmodes','instructions','prompts','tasks','mcp'].includes(keyCandidate)) {
+          const key = keyCandidate as CatalogResourceType;
+          cat.resources[key].push(summary);
+        }
+      }
+
+  const exportPayload: CatalogExport[] = Object.values(byCatalog);
+      const totalResources = resources.length;
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        generated_at: new Date().toISOString(),
+        catalogs: exportPayload,
+        counts: { catalogs: catalogs.length, resources: totalResources }
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   // Minimal index.json & file serving (Phase 0, no auth)
