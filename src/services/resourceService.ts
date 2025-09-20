@@ -25,6 +25,8 @@ export class ResourceService implements IResourceService {
   private logger?: (msg: string) => void;
   private allowInsecureHttp = false; // dev-only override
   private disableLogRedaction = false; // dev-only: show raw paths/URLs
+  private enableLazyRemote = true; // feature flag for lazy remote loading
+  private bulkEndpointPath = '/catalog/catalog-export';
   constructor(private fileService: IFileService){}
 
   // Optional logger injected by host extension
@@ -63,6 +65,12 @@ export class ResourceService implements IResourceService {
   setDisableLogRedaction(flag: boolean){
     this.disableLogRedaction = !!flag;
     this.log(`[ResourceService] disableLogRedaction=${this.disableLogRedaction}`);
+  }
+
+  /** Enable or disable lazy remote loading (bulk metadata + on-demand file fetch) */
+  setEnableLazyRemote(flag: boolean){
+    this.enableLazyRemote = !!flag;
+    this.log(`[ResourceService] enableLazyRemote=${this.enableLazyRemote}`);
   }
 
   setSourceOverrides(overrides: Partial<Record<ResourceCategory,string>>){
@@ -106,11 +114,87 @@ export class ResourceService implements IResourceService {
     }
   }
 
-  async discoverResources(repository: Repository): Promise<Resource[]> {
+  /**
+   * Discover resources for a repository.
+   * Progressive loading: an optional onProgress callback receives batched partial arrays
+   * as resources are discovered (especially remote fetches) so the UI can update incrementally.
+   */
+  async discoverResources(repository: Repository, opts?: { onProgress?: (partial: Resource[]) => void; batchSize?: number }): Promise<Resource[]> {
     const resources: Resource[] = [];
     const t0 = Date.now();
     let remoteSuccess = 0, remoteFailed = 0;
     this.log(`[ResourceService] discoverResources start repo=${repository.name} catalog=${repository.catalogPath} rootOverride=${this.rootCatalogOverride || '(none)'} targetWs=${this.targetWorkspaceOverride || '(none)'} currentWs=${this.currentWorkspaceRoot || '(none)'} runtimeDir=${this.runtimeDirectoryName}`);
+
+    // Bulk export lazy discovery (only when not using root override and at least one remote override exists)
+    const hasRemoteOverride = Object.values(this.sourceOverrides).some(v => !!v && /^https?:\/\//i.test(v));
+    const bulkCoveredCategories = new Set<ResourceCategory>();
+    if(!this.rootCatalogOverride && this.enableLazyRemote && hasRemoteOverride){
+      try {
+        const bulk = await this.tryBulkExport();
+        if(bulk && Array.isArray(bulk.catalogs)){
+          // Precompute normalized override bases per category for remoteUrl synthesis when content_url absent
+          const overrideBaseByCategory: Partial<Record<ResourceCategory,string>> = {};
+          for(const cat of Object.values(ResourceCategory)){
+            const ov = this.sourceOverrides[cat];
+            if(ov && /^https?:\/\//i.test(ov)){
+              // If override ends with category dir treat as directory listing base; else attempt to infer directory form
+              if(ov.endsWith('/')){
+                overrideBaseByCategory[cat] = ov.replace(/\/+/g,'/');
+              } else if(/\.(json|md|txt)$/i.test(ov.split('/').pop()||'')){
+                // single file override; cannot synthesize remoteUrl for other filenames
+                overrideBaseByCategory[cat] = undefined;
+              } else {
+                overrideBaseByCategory[cat] = ov + (ov.endsWith('/') ? '' : '/');
+              }
+            }
+          }
+          for(const catalog of bulk.catalogs){
+            for(const category of Object.values(ResourceCategory)){
+              const arr = (catalog.resources||{})[category];
+              if(!Array.isArray(arr)) continue;
+              // Mark this category as covered by bulk export (even if empty)
+              bulkCoveredCategories.add(category);
+              this.log(`[ResourceService] bulk lazy processing category=${category} resources=${arr.length}`);
+              for(const meta of arr){
+                const fileName = sanitizeFilename(meta.filename||'');
+                if(!fileName) continue;
+                const rel = path.join(CATEGORY_DIRS[category], fileName);
+                const abs = path.join(repository.runtimePath, '.copilot_catalog_cache', CATEGORY_DIRS[category], fileName);
+                let remoteUrl = meta.content_url || undefined;
+                if(!remoteUrl){
+                  const base = overrideBaseByCategory[category];
+                  if(base){
+                    remoteUrl = base + encodeURIComponent(fileName);
+                  }
+                }
+                const res: Resource = {
+                  id: `${repository.name}:remote-lazy:${rel}`,
+                  relativePath: rel,
+                  absolutePath: abs,
+                  category,
+                  targetSubdir: CATEGORY_DIRS[category],
+                  repository,
+                  state: ResourceState.INACTIVE,
+                  origin: 'remote',
+                  catalogName: catalog.name,
+                  remoteUrl,
+                  lazy: true,
+                  description: meta.description,
+                  tags: meta.tags,
+                  size: meta.size,
+                  truncated: meta.truncated
+                } as any;
+                resources.push(res);
+                try { opts?.onProgress?.([res]); } catch {}
+              }
+            }
+          }
+        }
+        this.log(`[ResourceService] bulk lazy processing complete: created ${resources.filter(r => r.origin === 'remote' && (r as any).lazy).length} lazy resources`);
+      } catch(e:any){
+        this.log(`[ResourceService] bulk export failed: ${sanitizeErrorMessage(e)}`);
+      }
+    }
     // Unified root override mode (recursive, filename inference)
     if(this.rootCatalogOverride){
       this.log(`[ResourceService] rootCatalogOverride mode: scanning ${this.rootCatalogOverride}`);
@@ -144,6 +228,10 @@ export class ResourceService implements IResourceService {
     for(const category of Object.values(ResourceCategory)){
       const override = this.sourceOverrides[category];
       if(override && /^https?:\/\//i.test(override)){
+        // If lazy remote already supplied placeholder entries for this category, skip eager fetch
+        if(this.enableLazyRemote && (bulkCoveredCategories.has(category) || resources.some(r=> r.origin==='remote' && (r as any).lazy && r.category===category))){
+          continue;
+        }
         // Enhanced validation; allow HTTP/localhost only when dev override is enabled
         const urlValid = isValidDevRemoteUrl(override, this.allowInsecureHttp);
         if(!urlValid) {
@@ -171,7 +259,10 @@ export class ResourceService implements IResourceService {
                 const content = await this.fetchRemoteCached(fileUrl);
                 const abs = await this.cacheRemoteToDisk(repository, category, safeName, content);
                 const rel = path.join(CATEGORY_DIRS[category], safeName);
-                resources.push({ id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'});
+                const res: Resource = { id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'};
+                resources.push(res);
+                // Emit partial progress for every remote file fetched to allow UI streaming
+                try { opts?.onProgress?.([res]); } catch { /* ignore UI errors */ }
                 this.log(`[ResourceService] remote fetch file success category=${category} name=${safeName} bytes=${content.length}`);
                 remoteSuccess++;
               } catch (error) { 
@@ -185,7 +276,9 @@ export class ResourceService implements IResourceService {
             const safeName = sanitizeFilename(fileName);
             const abs = await this.cacheRemoteToDisk(repository, category, safeName, content);
             const rel = path.join(CATEGORY_DIRS[category], safeName);
-            resources.push({ id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'});
+            const res: Resource = { id: `${repository.name}:remote:${rel}`, relativePath: rel, absolutePath: abs, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'remote'};
+            resources.push(res);
+            try { opts?.onProgress?.([res]); } catch { /* ignore */ }
             this.log(`[ResourceService] remote fetch single success category=${category} name=${safeName} bytes=${content.length}`);
             remoteSuccess++;
           }
@@ -222,7 +315,10 @@ export class ResourceService implements IResourceService {
         // Ensure unique ID for resources from different repos but with same relative path
         const resourceId = `${repository.name}:${rel}`;
         if (!resources.find(r => r.id === resourceId)) {
-          resources.push({ id: resourceId, relativePath: rel, absolutePath: full, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'catalog'});
+          const res: Resource = { id: resourceId, relativePath: rel, absolutePath: full, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'catalog'};
+          resources.push(res);
+          // Batch progress emission for local catalog scanning
+          try { opts?.onProgress?.([res]); } catch {}
         }
       }
   }
@@ -244,7 +340,9 @@ export class ResourceService implements IResourceService {
             while(resources.find(r=> r.id === `${repository.name}:${relCandidate}`)){
               counter++; relCandidate = path.join(CATEGORY_DIRS[category], `${counter}_${path.basename(filePath)}`);
             }
-            resources.push({ id: `${repository.name}:${relCandidate}`, relativePath: relCandidate, absolutePath: filePath, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'catalog'});
+            const res: Resource = { id: `${repository.name}:${relCandidate}`, relativePath: relCandidate, absolutePath: filePath, category, targetSubdir: CATEGORY_DIRS[category], repository, state: ResourceState.INACTIVE, origin: 'catalog'};
+            resources.push(res);
+            try { opts?.onProgress?.([res]); } catch {}
         }
   } catch (e:any) { 
     this.log(`[ResourceService] fallback recursive scan failed: ${sanitizeErrorMessage(e)}`); 
@@ -271,7 +369,9 @@ export class ResourceService implements IResourceService {
         if(!exists){
           const disabled = entry.toLowerCase().endsWith('.disabled');
           const rel = path.join(CATEGORY_DIRS[category], entry); // relative to catalog path semantics
-          runtimeUser.push({ id: `${repository.name}:user:${rel}`, relativePath: rel, absolutePath: runtimeFull, category, targetSubdir: CATEGORY_DIRS[category], repository, state: disabled ? ResourceState.INACTIVE : ResourceState.ACTIVE, origin: 'user', disabled });
+          const res: Resource = { id: `${repository.name}:user:${rel}`, relativePath: rel, absolutePath: runtimeFull, category, targetSubdir: CATEGORY_DIRS[category], repository, state: disabled ? ResourceState.INACTIVE : ResourceState.ACTIVE, origin: 'user', disabled };
+          runtimeUser.push(res);
+          try { opts?.onProgress?.([res]); } catch {}
         }
       }
     }
@@ -395,6 +495,82 @@ export class ResourceService implements IResourceService {
         reject(new Error(`Request failed: ${sanitizeErrorMessage(e)}`)); 
       }
     });
+  }
+
+  /** Ensure remote content exists locally for a lazy resource (download on-demand). */
+  async ensureRemoteContent(resource: Resource): Promise<void> {
+    if(resource.origin !== 'remote' || !(resource as any).lazy) return;
+    const exists = await this.fileService.pathExists(resource.absolutePath).catch(()=>false);
+    if(exists){ (resource as any).lazy = false; return; }
+    const url = (resource as any).remoteUrl;
+    if(!url){ throw new Error('Missing remoteUrl for lazy remote resource'); }
+    const content = await this.fetchRemoteCached(url);
+    await this.fileService.ensureDirectory(path.dirname(resource.absolutePath));
+    await this.fileService.writeFile(resource.absolutePath, content);
+    (resource as any).lazy = false;
+    resource.state = await this.getResourceState(resource);
+  }
+
+  private async tryBulkExport(): Promise<any|undefined> {
+    try {
+      const first = Object.values(this.sourceOverrides).find(v => !!v && /^https?:\/\//i.test(v));
+      if(!first) return undefined;
+      // Build a list of candidate base URLs to attempt. We start from the first remote override
+      // and progressively strip known catalog/category path segments (e.g. /catalog/chatmodes/ → /).
+      const candidates: string[] = [];
+      try {
+        const u = new URL(first);
+        const originalPath = u.pathname || '/';
+        const CATEGORY_SEG_RE = /(chatmodes|instructions|prompts|tasks|mcp)\/?$/i;
+        let pathVariants = new Set<string>();
+        let current = originalPath;
+        
+        // 1. Original path (but not if it ends with a category, as that would create invalid URLs)
+        if(!CATEGORY_SEG_RE.test(current)){
+          pathVariants.add(current);
+        }
+        
+        // 2. Strip trailing category segment
+        if(CATEGORY_SEG_RE.test(current)){
+          pathVariants.add(current.replace(CATEGORY_SEG_RE,'').replace(/\/$/,'') || '/');
+        }
+        
+        // 3. If path contains /catalog/ keep prefix before that
+        const catalogIdx = current.toLowerCase().indexOf('/catalog/');
+        if(catalogIdx !== -1){
+          pathVariants.add(current.substring(0, catalogIdx) || '/');
+        }
+        
+        // 4. Root path always a fallback
+        pathVariants.add('/');
+        
+        for(const p of pathVariants){
+          const basePath = p.endsWith('/') ? p.slice(0,-1) : p; // avoid double slash when appending endpoint
+          const attempt = `${u.protocol}//${u.host}${basePath}${this.bulkEndpointPath}`;
+          candidates.push(attempt);
+        }
+      } catch {
+        // Fallback simplistic trimming if URL parsing fails
+        const trimmed = first.replace(/\/(chatmodes|instructions|prompts|tasks|mcp)\/?$/i,'');
+        candidates.push(trimmed.endsWith('/') ? trimmed.slice(0,-1)+ this.bulkEndpointPath : trimmed + this.bulkEndpointPath);
+      }
+
+      for(const bulkUrl of candidates){
+        try {
+          this.log(`[ResourceService] bulk export attempt url=${this.disableLogRedaction ? bulkUrl : '[URL]'}`);
+          const raw = await this.fetchRemoteCached(bulkUrl);
+          const parsed = JSON.parse(raw);
+          if(parsed && Array.isArray(parsed.catalogs)){
+            this.log(`[ResourceService] bulk export success catalogs=${parsed.catalogs.length} url=${this.disableLogRedaction ? bulkUrl : '[URL]'}`);
+            return parsed;
+          }
+        } catch (e:any){
+          this.log(`[ResourceService] bulk export attempt failed url=${this.disableLogRedaction ? bulkUrl : '[URL]'} err=${sanitizeErrorMessage(e)}`);
+          continue;
+        }
+      }
+      return undefined;
+    } catch { return undefined; }
   }
 
   private async fetchRemoteCached(url: string): Promise<string>{
