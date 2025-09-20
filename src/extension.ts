@@ -148,7 +148,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Multiple catalog support
 		let catalogFilter: string | undefined;
 		let allResources: Resource[] = []; // All resources before filtering
-		let filenameFilter: string | undefined; // new: quick filename filter (client-side)
+		let searchFilter: string | undefined; // enhanced: search across filename, description, tags, catalog
 
 		const config = vscode.workspace.getConfiguration();
 		const resolveWorkspacePath = (input?: string): string | undefined => {
@@ -325,9 +325,30 @@ export async function activate(context: vscode.ExtensionContext) {
 
 		function applyFilters(raw: Resource[]): Resource[] {
 			let out = catalogFilter ? raw.filter(r => r.catalogName === catalogFilter) : raw;
-			if(filenameFilter){
-				const needle = filenameFilter.toLowerCase();
-				out = out.filter(r => r.relativePath.toLowerCase().includes(needle));
+			if(searchFilter){
+				const needle = searchFilter.toLowerCase();
+				out = out.filter(r => {
+					// Search in filename/path
+					if (r.relativePath.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					// Search in metadata for lazy resources
+					const lazyRes = r as any;
+					if (lazyRes.description && lazyRes.description.toLowerCase().includes(needle)) {
+						return true;
+					}
+					if (lazyRes.tags && lazyRes.tags.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					// Search in catalog name
+					if (r.catalogName && r.catalogName.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					return false;
+				});
 			}
 			return out;
 		}
@@ -337,12 +358,12 @@ export async function activate(context: vscode.ExtensionContext) {
 			const collapsed = collapseDuplicates(allResources);
 			const filteredResources = applyFilters(collapsed);
 			const showFilterControl = allResources.length > 2;
-			overviewTree.setFilenameFilterState(filenameFilter, showFilterControl); overviewTree.setRepository(currentRepo, filteredResources);
-			chatmodesTree.setFilenameFilterState(filenameFilter, showFilterControl); chatmodesTree.setRepository(currentRepo, filteredResources);
-			instructionsTree.setFilenameFilterState(filenameFilter, showFilterControl); instructionsTree.setRepository(currentRepo, filteredResources);
-			promptsTree.setFilenameFilterState(filenameFilter, showFilterControl); promptsTree.setRepository(currentRepo, filteredResources);
-			tasksTree.setFilenameFilterState(filenameFilter, showFilterControl); tasksTree.setRepository(currentRepo, filteredResources);
-			mcpTree.setFilenameFilterState(filenameFilter, showFilterControl); mcpTree.setRepository(currentRepo, filteredResources);
+			overviewTree.setFilenameFilterState(searchFilter, showFilterControl); overviewTree.setRepository(currentRepo, filteredResources);
+			chatmodesTree.setFilenameFilterState(searchFilter, showFilterControl); chatmodesTree.setRepository(currentRepo, filteredResources);
+			instructionsTree.setFilenameFilterState(searchFilter, showFilterControl); instructionsTree.setRepository(currentRepo, filteredResources);
+			promptsTree.setFilenameFilterState(searchFilter, showFilterControl); promptsTree.setRepository(currentRepo, filteredResources);
+			tasksTree.setFilenameFilterState(searchFilter, showFilterControl); tasksTree.setRepository(currentRepo, filteredResources);
+			mcpTree.setFilenameFilterState(searchFilter, showFilterControl); mcpTree.setRepository(currentRepo, filteredResources);
 			const hasResources = filteredResources.length > 0;
 			vscode.commands.executeCommand('setContext', 'copilotCatalog.hasResources', hasResources);
 		}
@@ -585,8 +606,8 @@ export async function activate(context: vscode.ExtensionContext) {
 						allResources;
 					const active = filteredResources.filter(r => r.state === ResourceState.ACTIVE).length;
 					const statusText = catalogFilter ? 
-						`ContextShare $(library) ${active}/${filteredResources.length} [${catalogFilter}${filenameFilter? ' | '+filenameFilter: ''}]` :
-						`ContextShare $(library) ${active}/${filteredResources.length}${filenameFilter? ' ['+filenameFilter+']':''}`;
+						`ContextShare $(library) ${active}/${filteredResources.length} [${catalogFilter}${searchFilter? ' | '+searchFilter: ''}]` :
+						`ContextShare $(library) ${active}/${filteredResources.length}${searchFilter? ' ['+searchFilter+']':''}`;
 					status.text = statusText;
 					status.tooltip = 'ContextShare: Refresh';
 					status.show();
@@ -1163,14 +1184,14 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			})
 			,
-			// Quick filename filter command
+			// Quick search filter command
 			vscode.commands.registerCommand('copilotCatalog.filterFilename', async () => {
-				const val = await vscode.window.showInputBox({ prompt: 'Filter resources by filename substring (empty to clear)', value: filenameFilter || '' });
+				const val = await vscode.window.showInputBox({ prompt: 'Filter resources by name, description, tags, or catalog (empty to clear)', value: searchFilter || '' });
 				if(val === undefined) return; // cancelled
-				filenameFilter = val.trim() || undefined;
+				searchFilter = val.trim() || undefined;
 				await loadResources();
 				updateStatus();
-				vscode.window.showInformationMessage(filenameFilter ? `Filename filter applied: ${filenameFilter}` : 'Filename filter cleared');
+				vscode.window.showInformationMessage(searchFilter ? `Search filter applied: ${searchFilter}` : 'Search filter cleared');
 			})
 			,
 			vscode.commands.registerCommand('copilotCatalog.openSettings', async () => {

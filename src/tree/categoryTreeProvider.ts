@@ -13,7 +13,7 @@ export class CategoryTreeProvider {
   private resources: Resource[] = [];
   private repo?: Repository;
   private catalogFilter?: string;
-  private filenameFilter?: string;
+  private searchFilter?: string;
   private showFilterItem = false;
   private loading = false;
   
@@ -25,7 +25,7 @@ export class CategoryTreeProvider {
   }
 
   setFilenameFilterState(filter: string | undefined, show: boolean){
-    this.filenameFilter = filter;
+    this.searchFilter = filter;
     this.showFilterItem = show;
     this.refresh();
   }
@@ -138,12 +138,12 @@ export class CategoryTreeProvider {
   }
 
   private filterControlItem(){
-    const active = !!this.filenameFilter;
-    const label = active ? `Filter: "${this.filenameFilter}" (click to edit)` : 'Filter: (click to add)';
+    const active = !!this.searchFilter;
+    const label = active ? `Search: "${this.searchFilter}" (click to edit)` : 'Search: (click to add)';
     const item = new CatalogTreeItem(label, vscode ? vscode.TreeItemCollapsibleState.None : 0, { type:'filter-control'});
     (item as any).contextValue = 'filter-control';
     (item as any).command = { command: 'copilotCatalog.filterFilename', title: 'Edit Filter' };
-    if(vscode){ (item as any).iconPath = new vscode.ThemeIcon('filter'); }
+    if(vscode){ (item as any).iconPath = new vscode.ThemeIcon('search'); }
     return item;
   }
 }
