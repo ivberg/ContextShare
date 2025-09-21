@@ -130,7 +130,7 @@ export class OverviewTreeProvider {
 
   private filterControlItem(){
     const active = !!this.filenameFilter;
-    const label = active ? `Filter: "${this.filenameFilter}" (click to edit)` : 'Filter: (click to add)';
+    const label = active ? `Filter: "${this.filenameFilter}" (Edit)` : 'Filter: (None)';
     const item = new CatalogTreeItem(label, vscode ? vscode.TreeItemCollapsibleState.None : 0, { type:'filter-control'});
     (item as any).contextValue = 'filter-control';
     (item as any).command = { command: 'copilotCatalog.filterFilename', title: 'Edit Filter' };

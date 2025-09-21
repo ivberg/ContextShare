@@ -182,7 +182,8 @@ export class ResourceService implements IResourceService {
                   description: meta.description,
                   tags: meta.tags,
                   size: meta.size,
-                  truncated: meta.truncated
+                  truncated: meta.truncated,
+                  domainCategory: meta.category  // Domain category from server (automation, web-development, etc.)
                 } as any;
                 resources.push(res);
                 try { opts?.onProgress?.([res]); } catch {}

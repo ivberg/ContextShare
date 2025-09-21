@@ -71,27 +71,32 @@ export class CategoryTreeProvider {
       (ti as any).id = r.id;
       
       // Enhanced tooltip with metadata for lazy resources
-      const baseTooltip = r.state === ResourceState.ACTIVE ? `Deactivate ${r.relativePath}` : `Activate ${r.relativePath}`;
-      let tooltip = baseTooltip;
+      let tooltip = '';
       
       // Add metadata if available (for lazy remote resources)
       const lazyResource = r as any;
-      if (lazyResource.lazy && (lazyResource.description || lazyResource.tags || lazyResource.size)) {
-        const metaParts = [baseTooltip];
+      if (lazyResource.lazy && (lazyResource.description || lazyResource.tags || lazyResource.size || lazyResource.domainCategory)) {
+        const metaParts = [];
         if (lazyResource.description) {
-          metaParts.push(`\nDescription: ${lazyResource.description}`);
+          metaParts.push(`Description: ${lazyResource.description}`);
+        }
+        if (lazyResource.domainCategory) {
+          metaParts.push(`Category: ${lazyResource.domainCategory}`);
         }
         if (lazyResource.tags) {
-          metaParts.push(`\nTags: ${lazyResource.tags}`);
+          metaParts.push(`Tags: ${lazyResource.tags}`);
         }
         if (lazyResource.size) {
           const sizeKB = Math.round(lazyResource.size / 1024);
-          metaParts.push(`\nSize: ${sizeKB > 0 ? sizeKB + ' KB' : lazyResource.size + ' bytes'}`);
+          metaParts.push(`Size: ${sizeKB > 0 ? sizeKB + ' KB' : lazyResource.size + ' bytes'}`);
         }
         if (lazyResource.truncated) {
-          metaParts.push(`\n(Content truncated in bulk export)`);
+          metaParts.push(`(Content truncated in bulk export)`);
         }
-        tooltip = metaParts.join('');
+        tooltip = metaParts.join('\n');
+      } else {
+        // Fallback for non-lazy resources - just show the path
+        tooltip = r.relativePath;
       }
       
       (ti as any).tooltip = tooltip;
@@ -139,10 +144,10 @@ export class CategoryTreeProvider {
 
   private filterControlItem(){
     const active = !!this.searchFilter;
-    const label = active ? `Search: "${this.searchFilter}" (click to edit)` : 'Search: (click to add)';
+    const label = active ? `Search: "${this.searchFilter}" (Edit)` : 'Search: (None)';
     const item = new CatalogTreeItem(label, vscode ? vscode.TreeItemCollapsibleState.None : 0, { type:'filter-control'});
     (item as any).contextValue = 'filter-control';
-    (item as any).command = { command: 'copilotCatalog.filterFilename', title: 'Edit Filter' };
+    (item as any).command = { command: 'copilotCatalog.filterFilename', title: 'Edit' };
     if(vscode){ (item as any).iconPath = new vscode.ThemeIcon('search'); }
     return item;
   }

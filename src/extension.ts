@@ -341,6 +341,9 @@ export async function activate(context: vscode.ExtensionContext) {
 					if (lazyRes.tags && lazyRes.tags.toLowerCase().includes(needle)) {
 						return true;
 					}
+					if (lazyRes.domainCategory && lazyRes.domainCategory.toLowerCase().includes(needle)) {
+						return true;
+					}
 					
 					// Search in catalog name
 					if (r.catalogName && r.catalogName.toLowerCase().includes(needle)) {
