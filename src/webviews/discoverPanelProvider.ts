@@ -884,9 +884,8 @@ export class DiscoverPanelProvider {
 
   private async checkUserApplicationStatus(hatId: string): Promise<boolean> {
     try {
-      // Use VS Code's global storage path for user tracking
-      const globalStoragePath = vscode.env.appRoot.replace(/[\\\/]resources[\\\/]app$/, '');
-      const trackingFile = path.join(globalStoragePath, 'User', 'copilot-applied-hats.json');
+    const globalStoragePath = this.getVSCodeUserDataPath();
+    const trackingFile = path.join(globalStoragePath, 'copilot-applied-hats.json');
       
       const tracking = await this.readTrackingFile(trackingFile);
       return tracking.appliedHats.includes(hatId);
@@ -938,8 +937,8 @@ export class DiscoverPanelProvider {
   }
 
   private async markHatAsAppliedToUser(hatId: string): Promise<void> {
-    const globalStoragePath = vscode.env.appRoot.replace(/[\\\/]resources[\\\/]app$/, '');
-    const trackingFile = path.join(globalStoragePath, 'User', 'copilot-applied-hats.json');
+    const globalStoragePath = this.getVSCodeUserDataPath();
+    const trackingFile = path.join(globalStoragePath, 'copilot-applied-hats.json');
     
     const tracking = await this.readTrackingFile(trackingFile);
     if (!tracking.appliedHats.includes(hatId)) {
