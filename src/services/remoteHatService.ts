@@ -455,7 +455,8 @@ export class RemoteHatService {
   private async applyResourceToWorkspace(resourcePath: string, content: string, workspaceRoot: string, fileService: any): Promise<{ success: boolean; message: string }> {
     try {
       const path = await import('path');
-      const category = resourcePath.split('/')[0];
+      const split = resourcePath.split('/');
+      const category = split.length > 2 && split[split.length - 2] || 'general';
       const filename = path.basename(resourcePath);
       
       // Determine target directory based on category
@@ -493,7 +494,8 @@ export class RemoteHatService {
   private async applyResourceToUser(resourcePath: string, content: string, userDataPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
     try {
       const path = await import('path');
-      const category = resourcePath.split('/')[0];
+      const split = resourcePath.split('/');
+      const category = split.length > 2 && split[split.length - 2] || 'general';
       const filename = path.basename(resourcePath);
       
       // Determine target path based on category
