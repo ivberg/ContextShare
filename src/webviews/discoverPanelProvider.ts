@@ -13,6 +13,8 @@ interface DiscoverResult {
   resourceBreakdown?: string; // Category breakdown of resources
   isLocal?: boolean; // For local resources
   isPulled?: boolean; // For remote resources that exist locally
+  isAppliedToWorkspace?: boolean; // For remote resources applied to workspace
+  isAppliedToUser?: boolean; // For remote resources applied to user settings
 }
 
 type TabType = 'remote' | 'local';
@@ -127,6 +129,10 @@ export class DiscoverPanelProvider {
               await this.applyLocalHatToWorkspace(String(message.id));
             } else if (message.action === 'apply-user' && message.id) {
               await this.applyLocalHatToUser(String(message.id));
+            } else if (message.action === 'apply-workspace-remote' && message.id) {
+              await this.applyRemoteHatToWorkspace(String(message.id));
+            } else if (message.action === 'apply-user-remote' && message.id) {
+              await this.applyRemoteHatToUser(String(message.id));
             }
             break;
         }
@@ -192,12 +198,18 @@ export class DiscoverPanelProvider {
         const fullHat = await this.remoteHatService.getHat(i.id);
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
+        // Check application status
+        const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
+        const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
+        
         return {
           id: i.id,
           label: i.name,
           description: i.description,
           resourceBreakdown,
-          isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+          isPulled: localHats.some(local => local.id === i.id || local.label === i.name),
+          isAppliedToWorkspace,
+          isAppliedToUser
         };
       }));
     } else {
@@ -244,12 +256,18 @@ export class DiscoverPanelProvider {
         const fullHat = await this.remoteHatService.getHat(i.id);
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
+        // Check application status
+        const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
+        const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
+        
         return {
           id: i.id,
           label: i.name,
           description: i.description,
           resourceBreakdown,
-          isPulled: localHats.some(local => local.id === i.id || local.label === i.name)
+          isPulled: localHats.some(local => local.id === i.id || local.label === i.name),
+          isAppliedToWorkspace,
+          isAppliedToUser
         };
       }));
       this._update();
@@ -745,6 +763,112 @@ export class DiscoverPanelProvider {
     }
   }
 
+  private async checkWorkspaceApplicationStatus(hatId: string): Promise<boolean> {
+    // Check if the hat has been applied to the current workspace
+    // This could be implemented by checking for a marker file or configuration
+    // For now, we'll return false as a placeholder
+    // TODO: Implement proper workspace application tracking
+    return false;
+  }
+
+  private async checkUserApplicationStatus(hatId: string): Promise<boolean> {
+    // Check if the hat has been applied to user settings
+    // This could be implemented by checking user configuration or hat registry
+    // For now, we'll return false as a placeholder
+    // TODO: Implement proper user application tracking
+    return false;
+  }
+
+  private async applyRemoteHatToWorkspace(id: string) {
+    try {
+      // Check if workspace is available
+      if (!vscode.workspace.workspaceFolders?.length) {
+        vscode.window.showWarningMessage('No workspace is open. Please open a folder or workspace first.');
+        return;
+      }
+
+      // Get the remote hat details
+      const hat = await this.remoteHatService.getHat(id);
+      if (!hat) {
+        vscode.window.showWarningMessage('Hat not found in remote store.');
+        return;
+      }
+
+      // Show confirmation
+      const choice = await vscode.window.showInformationMessage(
+        `Apply hat "${hat.name}" directly to workspace?`,
+        { 
+          detail: `This will download and apply ${hat.resources.length} resources directly to your workspace's .github or .vscode directory (as appropriate for each resource type).`,
+          modal: true 
+        },
+        'Apply to Workspace', 'Cancel'
+      );
+      
+      if (choice !== 'Apply to Workspace') {
+        return;
+      }
+
+      // Apply resources directly from remote
+      const result = await this.remoteHatService.applyHatToWorkspace(id);
+      
+      if (result.success) {
+        vscode.window.showInformationMessage(
+          `Successfully applied hat "${hat.name}" to workspace! Applied ${result.appliedCount} resources.`
+        );
+        
+        // Update the application status and refresh
+        await this.loadAllRemoteResources();
+      } else {
+        vscode.window.showErrorMessage(`Failed to apply hat "${hat.name}": ${result.message}`);
+      }
+      
+    } catch (e: any) {
+      vscode.window.showErrorMessage('Failed to apply hat to workspace: ' + (e?.message || e));
+    }
+  }
+
+  private async applyRemoteHatToUser(id: string) {
+    try {
+      // Get the remote hat details
+      const hat = await this.remoteHatService.getHat(id);
+      if (!hat) {
+        vscode.window.showWarningMessage('Hat not found in remote store.');
+        return;
+      }
+
+      // Show confirmation
+      const choice = await vscode.window.showInformationMessage(
+        `Apply hat "${hat.name}" directly to user settings?`,
+        { 
+          detail: `This will download and apply ${hat.resources.length} resources directly to your VS Code user data directory. Tasks will be merged with your global tasks.json, other resources will be copied to appropriate user locations.`,
+          modal: true 
+        },
+        'Apply to User', 'Cancel'
+      );
+      
+      if (choice !== 'Apply to User') {
+        return;
+      }
+
+      // Apply resources directly from remote to user settings
+      const result = await this.remoteHatService.applyHatToUser(id);
+      
+      if (result.success) {
+        vscode.window.showInformationMessage(
+          `Successfully applied hat "${hat.name}" to user settings! Applied ${result.appliedCount} resources.`
+        );
+        
+        // Update the application status and refresh
+        await this.loadAllRemoteResources();
+      } else {
+        vscode.window.showErrorMessage(`Failed to apply hat "${hat.name}": ${result.message}`);
+      }
+      
+    } catch (e: any) {
+      vscode.window.showErrorMessage('Failed to apply hat to user settings: ' + (e?.message || e));
+    }
+  }
+
   public dispose() {
     DiscoverPanelProvider.currentPanel = undefined;
 
@@ -797,6 +921,12 @@ export class DiscoverPanelProvider {
             ${this.activeTab === 'remote' ? 
               `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
                 ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
+              </button>
+              <button data-action="apply-workspace-remote" data-id="${escape(r.id)}" ${!hasWorkspace || r.isAppliedToWorkspace ? 'disabled' : ''}>
+                ${r.isAppliedToWorkspace ? 'Applied to Workspace' : 'Apply to Workspace'}
+              </button>
+              <button data-action="apply-user-remote" data-id="${escape(r.id)}" ${r.isAppliedToUser ? 'disabled' : ''}>
+                ${r.isAppliedToUser ? 'Applied to User' : 'Apply to User'}
               </button>` :
               `<button data-action="apply-workspace" data-id="${escape(r.id)}" ${!hasWorkspace ? 'disabled' : ''}>
                 Apply to Workspace

@@ -34,6 +34,14 @@ export class RemoteHatService {
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => {
           try {
+            if (res.statusCode === 302) {
+              const location = res.headers.location;
+              if (location) {
+                // Follow redirect
+                this.makeRequest(location).then(resolve).catch(reject);
+                return;
+              }
+            }
             if (res.statusCode !== 200) {
               reject(new Error(`HTTP ${res.statusCode}: ${data}`));
               return;
@@ -311,6 +319,284 @@ export class RemoteHatService {
     } catch (error) {
       await logger.error(`Failed to pull hat ${id} to local repository: ${getErrorMessage(error)}`);
       return false;
+    }
+  }
+
+  async applyHatToWorkspace(id: string): Promise<{ success: boolean; message?: string; appliedCount?: number }> {
+    try {
+      // Get the hat details
+      const hat = await this.getHat(id);
+      if (!hat) {
+        return { success: false, message: 'Hat not found' };
+      }
+
+      // Import necessary modules
+      const vscode = await import('vscode');
+      const { ResourceService } = await import('./resourceService');
+      const { FileService } = await import('./fileService');
+      
+      // Get current workspace
+      if (!vscode.workspace.workspaceFolders?.length) {
+        return { success: false, message: 'No workspace is open' };
+      }
+      
+      const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      
+      // Create service instances
+      const fileService = new FileService();
+      const resourceService = new ResourceService(fileService);
+      resourceService.setCurrentWorkspaceRoot(workspaceRoot);
+
+      let appliedCount = 0;
+      const errors: string[] = [];
+
+      // Apply each resource directly from remote
+      for (const resourcePath of hat.resources) {
+        try {
+          // Download resource content
+          const content = await this.downloadResourceContent(resourcePath);
+          if (!content) {
+            errors.push(`Failed to download ${resourcePath}`);
+            continue;
+          }
+
+          // Apply to workspace based on resource type
+          const result = await this.applyResourceToWorkspace(resourcePath, content, workspaceRoot, fileService);
+          if (result.success) {
+            appliedCount++;
+          } else {
+            errors.push(`${resourcePath}: ${result.message}`);
+          }
+        } catch (error: any) {
+          errors.push(`${resourcePath}: ${error?.message || 'Unknown error'}`);
+        }
+      }
+
+      const success = appliedCount > 0;
+      const message = errors.length > 0 ? `Applied ${appliedCount} resources with ${errors.length} errors` : undefined;
+      
+      return { success, message, appliedCount };
+    } catch (error: any) {
+      return { success: false, message: error?.message || 'Unknown error' };
+    }
+  }
+
+  async applyHatToUser(id: string): Promise<{ success: boolean; message?: string; appliedCount?: number }> {
+    try {
+      // Get the hat details
+      const hat = await this.getHat(id);
+      if (!hat) {
+        return { success: false, message: 'Hat not found' };
+      }
+
+      // Import necessary modules
+      const { FileService } = await import('./fileService');
+      
+      // Create service instances
+      const fileService = new FileService();
+      
+      // Get VS Code user data path
+      const userDataPath = this.getVSCodeUserDataPath();
+      if (!userDataPath) {
+        return { success: false, message: 'Could not determine VS Code user data directory' };
+      }
+
+      let appliedCount = 0;
+      const errors: string[] = [];
+
+      // Apply each resource directly from remote to user settings
+      for (const resourcePath of hat.resources) {
+        try {
+          // Download resource content
+          const content = await this.downloadResourceContent(resourcePath);
+          if (!content) {
+            errors.push(`Failed to download ${resourcePath}`);
+            continue;
+          }
+
+          // Apply to user settings based on resource type
+          const result = await this.applyResourceToUser(resourcePath, content, userDataPath, fileService);
+          if (result.success) {
+            appliedCount++;
+          } else {
+            errors.push(`${resourcePath}: ${result.message}`);
+          }
+        } catch (error: any) {
+          errors.push(`${resourcePath}: ${error?.message || 'Unknown error'}`);
+        }
+      }
+
+      const success = appliedCount > 0;
+      const message = errors.length > 0 ? `Applied ${appliedCount} resources with ${errors.length} errors` : undefined;
+      
+      return { success, message, appliedCount };
+    } catch (error: any) {
+      return { success: false, message: error?.message || 'Unknown error' };
+    }
+  }
+
+  private async downloadResourceContent(resourcePath: string): Promise<string | null> {
+    try {
+      // Construct the resource URL
+      const category = resourcePath.split('/')[0];
+      const filename = resourcePath.split('/').slice(1).join('/');
+      const url = `${this.baseUrl}/${category}/${filename}`;
+      
+      const response = await this.makeRequest(url);
+      return response.content || response || null;
+    } catch (error) {
+      await logger.error(`Failed to download resource ${resourcePath}: ${getErrorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async applyResourceToWorkspace(resourcePath: string, content: string, workspaceRoot: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const path = await import('path');
+      const category = resourcePath.split('/')[0];
+      const filename = path.basename(resourcePath);
+      
+      // Determine target directory based on category
+      let targetDir: string;
+      switch (category) {
+        case 'tasks':
+        case 'mcp':
+          targetDir = path.join(workspaceRoot, '.vscode');
+          break;
+        default:
+          targetDir = path.join(workspaceRoot, '.github', category);
+          break;
+      }
+      
+      const targetPath = path.join(targetDir, filename);
+      
+      // Ensure directory exists
+      await fileService.ensureDirectory(targetDir);
+      
+      // Write the file
+      await fileService.writeFile(targetPath, content);
+      
+      return {
+        success: true,
+        message: `Applied ${filename} to workspace`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to apply resource: ${error?.message || 'Unknown error'}`
+      };
+    }
+  }
+
+  private async applyResourceToUser(resourcePath: string, content: string, userDataPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const path = await import('path');
+      const category = resourcePath.split('/')[0];
+      const filename = path.basename(resourcePath);
+      
+      // Determine target path based on category
+      let targetPath: string;
+      switch (category) {
+        case 'tasks':
+          // Merge with existing tasks.json
+          targetPath = path.join(userDataPath, 'tasks.json');
+          return await this.mergeTasksToUser(content, targetPath, fileService);
+        
+        case 'mcp':
+          // Merge with existing mcp.json
+          targetPath = path.join(userDataPath, 'mcp.json');
+          return await this.mergeMcpToUser(content, targetPath, fileService);
+        
+        default:
+          // Copy to copilot-catalog subdirectory
+          const effectiveCategory = category === 'chatmodes' && 'prompts' || category;
+          const targetDir = path.join(userDataPath, effectiveCategory);
+          targetPath = path.join(targetDir, filename);
+          
+          await fileService.ensureDirectory(targetDir);
+          await fileService.writeFile(targetPath, content);
+          
+          return {
+            success: true,
+            message: `Applied ${filename} to user ${category}`
+          };
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to apply resource: ${error?.message || 'Unknown error'}`
+      };
+    }
+  }
+
+  private getVSCodeUserDataPath(): string | null {
+    try {
+      const os = require('os');
+      const path = require('path');
+      const homeDir = os.homedir();
+      return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
+    } catch {
+      return null;
+    }
+  }
+
+  private async mergeTasksToUser(content: string, targetPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const sourceTasks = JSON.parse(content);
+      
+      let existingTasks = { tasks: [] };
+      if (await fileService.pathExists(targetPath)) {
+        const existingContent = await fileService.readFile(targetPath);
+        existingTasks = JSON.parse(existingContent);
+      }
+      
+      // Merge tasks (simple append for now)
+      const mergedTasks = { ...existingTasks, ...sourceTasks };
+      
+      const path = await import('path');
+      await fileService.ensureDirectory(path.dirname(targetPath));
+      await fileService.writeFile(targetPath, JSON.stringify(mergedTasks, null, 2));
+      
+      return {
+        success: true,
+        message: 'Tasks merged successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to merge tasks: ${error?.message || 'Unknown error'}`
+      };
+    }
+  }
+
+  private async mergeMcpToUser(content: string, targetPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
+    try {
+      const sourceMcp = JSON.parse(content);
+      
+      let existingMcp = { mcpServers: {} };
+      if (await fileService.pathExists(targetPath)) {
+        const existingContent = await fileService.readFile(targetPath);
+        existingMcp = JSON.parse(existingContent);
+      }
+      
+      // Merge MCP servers
+      if (sourceMcp.mcpServers) {
+        Object.assign(existingMcp.mcpServers, sourceMcp.mcpServers);
+      }
+      
+      const path = await import('path');
+      await fileService.ensureDirectory(path.dirname(targetPath));
+      await fileService.writeFile(targetPath, JSON.stringify(existingMcp, null, 2));
+      
+      return {
+        success: true,
+        message: 'MCP servers merged successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to merge MCP config: ${error?.message || 'Unknown error'}`
+      };
     }
   }
 
