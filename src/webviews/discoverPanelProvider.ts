@@ -12,10 +12,19 @@ interface DiscoverResult {
   label: string; 
   description?: string;
   resourceBreakdown?: string; // Category breakdown of resources
+  resources?: ResourceDetail[]; // Detailed resource information for expansion
   isLocal?: boolean; // For local resources
   isPulled?: boolean; // For remote resources that exist locally
   isAppliedToWorkspace?: boolean; // For remote resources applied to workspace
   isAppliedToUser?: boolean; // For remote resources applied to user settings
+}
+
+interface ResourceDetail {
+  filename: string;
+  title?: string;
+  description?: string;
+  type: string;
+  url?: string;
 }
 
 type TabType = 'remote' | 'local';
@@ -199,6 +208,9 @@ export class DiscoverPanelProvider {
         const fullHat = await this.remoteHatService.getHat(i.id);
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
+        // Get detailed resource information for expansion
+        const resources = fullHat ? await this.getResourceDetails(fullHat.resources) : [];
+        
         // Check application status
         const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
         const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
@@ -208,6 +220,7 @@ export class DiscoverPanelProvider {
           label: i.name,
           description: i.description,
           resourceBreakdown,
+          resources,
           isPulled: localHats.some(local => local.id === i.id || local.label === i.name),
           isAppliedToWorkspace,
           isAppliedToUser
@@ -243,6 +256,60 @@ export class DiscoverPanelProvider {
     return breakdown || 'No resources';
   }
 
+  private async getResourceDetails(resources: string[]): Promise<ResourceDetail[]> {
+    // For now, extract basic info from the resource paths/URLs
+    // This could be enhanced to fetch more metadata from the admin API in the future
+    return resources.map(resourcePath => {
+      if (resourcePath.startsWith('http://') || resourcePath.startsWith('https://')) {
+        // Extract filename from URL
+        const urlParts = resourcePath.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        const type = this.inferCategoryFromFilename(filename);
+        
+        return {
+          filename,
+          title: filename.replace(/\.(chatmode|instructions|instruction|prompt|task|mcp)\.(md|json)$/, ''),
+          description: `${type} resource`, // Basic description - could be enhanced
+          type,
+          url: resourcePath
+        };
+      } else {
+        // Handle local path format
+        const pathParts = resourcePath.split('/');
+        const filename = pathParts[pathParts.length - 1];
+        const type = pathParts.length > 1 ? pathParts[0] : this.inferCategoryFromFilename(filename);
+        
+        return {
+          filename,
+          title: filename.replace(/\.(chatmode|instructions|instruction|prompt|task|mcp)\.(md|json)$/, ''),
+          description: `${type} resource`,
+          type,
+          url: resourcePath
+        };
+      }
+    });
+  }
+
+  private inferCategoryFromFilename(filename: string): string {
+    if (filename.endsWith('.chatmode.md')) return 'chatmodes';
+    if (filename.endsWith('.instructions.md') || filename.endsWith('.instruction.md')) return 'instructions';
+    if (filename.endsWith('.prompt.md')) return 'prompts';
+    if (filename.endsWith('.task.json')) return 'tasks';
+    if (filename.endsWith('.mcp.json')) return 'mcp';
+    return 'unknown';
+  }
+
+  private getResourceIcon(type: string): string {
+    switch (type) {
+      case 'chatmodes': return '💬';
+      case 'instructions': return '📋';
+      case 'prompts': return '🎯';
+      case 'tasks': return '⚙️';
+      case 'mcp': return '🔗';
+      default: return '📄';
+    }
+  }
+
   private async loadAllRemoteResources() {
     try {
       // Show loading state
@@ -258,6 +325,9 @@ export class DiscoverPanelProvider {
         const fullHat = await this.remoteHatService.getHat(i.id);
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
+        // Get detailed resource information for expansion
+        const resources = fullHat ? await this.getResourceDetails(fullHat.resources) : [];
+        
         // Check application status
         const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
         const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
@@ -267,6 +337,7 @@ export class DiscoverPanelProvider {
           label: i.name,
           description: i.description,
           resourceBreakdown,
+          resources,
           isPulled: localHats.some(local => local.id === i.id || local.label === i.name),
           isAppliedToWorkspace,
           isAppliedToUser
@@ -979,16 +1050,35 @@ export class DiscoverPanelProvider {
         <div class="result-content">
           <div class="result-main">
             <div class="result-header">
-              <div class="title">${escape(r.label)}</div>
-              ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
-              ${r.isAppliedToWorkspace ? '<div class="status-badge applied-workspace">Applied to Workspace</div>' : ''}
-              ${r.isAppliedToUser ? '<div class="status-badge applied-user">Applied to User</div>' : ''}
+              <div class="title-row">
+                <div class="title">${escape(r.label)}</div>
+                ${r.resources && r.resources.length > 0 ? `<button class="expand-btn" data-action="toggle-expand" data-id="${escape(r.id)}">▼</button>` : ''}
+              </div>
+              <div class="badges">
+                ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
+                ${r.isAppliedToWorkspace ? '<div class="status-badge applied-workspace">Applied to Workspace</div>' : ''}
+                ${r.isAppliedToUser ? '<div class="status-badge applied-user">Applied to User</div>' : ''}
+              </div>
             </div>
             ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
             ${r.resourceBreakdown ? `
               <div class="resource-breakdown">
                 <span class="breakdown-label">Resources:</span>
                 <span class="breakdown-content">${escape(r.resourceBreakdown)}</span>
+              </div>
+            ` : ''}
+            ${r.resources && r.resources.length > 0 ? `
+              <div class="resource-list" data-id="${escape(r.id)}" style="display: none;">
+                <div class="resource-list-header">Resource Details:</div>
+                ${r.resources.map(resource => `
+                  <div class="resource-item" title="${escape(resource.description || '')}">
+                    <div class="resource-icon">${this.getResourceIcon(resource.type)}</div>
+                    <div class="resource-info">
+                      <div class="resource-name">${escape(resource.title || resource.filename)}</div>
+                      <div class="resource-type">${escape(resource.type)}</div>
+                    </div>
+                  </div>
+                `).join('')}
               </div>
             ` : ''}
           </div>
@@ -1190,10 +1280,41 @@ export class DiscoverPanelProvider {
         
         .result-header {
             display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        
+        .title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .badges {
+            display: flex;
             align-items: center;
             flex-wrap: wrap;
             gap: 8px;
-            margin-bottom: 4px;
+        }
+        
+        .expand-btn {
+            background: none;
+            border: none;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+        
+        .expand-btn:hover {
+            background-color: var(--vscode-toolbar-hoverBackground);
+        }
+        
+        .expand-btn.expanded {
+            transform: rotate(180deg);
         }
         
         .result .title {
@@ -1255,6 +1376,65 @@ export class DiscoverPanelProvider {
         
         .breakdown-content {
             font-style: italic;
+        }
+        
+        .resource-list {
+            margin-top: 12px;
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 4px;
+            padding: 8px;
+            background: var(--vscode-editorWidget-background);
+        }
+        
+        .resource-list-header {
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 8px;
+            color: var(--vscode-descriptionForeground);
+        }
+        
+        .resource-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--vscode-editorWidget-border);
+            cursor: help;
+        }
+        
+        .resource-item:last-child {
+            border-bottom: none;
+        }
+        
+        .resource-item:hover {
+            background-color: var(--vscode-list-hoverBackground);
+            border-radius: 3px;
+        }
+        
+        .resource-icon {
+            font-size: 14px;
+            width: 16px;
+            text-align: center;
+        }
+        
+        .resource-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .resource-name {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--vscode-foreground);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .resource-type {
+            font-size: 10px;
+            color: var(--vscode-descriptionForeground);
+            text-transform: uppercase;
         }
         
         .result .actions {
@@ -1369,8 +1549,25 @@ export class DiscoverPanelProvider {
             const action = target.getAttribute('data-action');
             if (!action) return;
             
-            const id = target.getAttribute('data-id');
-            vscode.postMessage({ type: 'discover.action', action, id });
+            if (action === 'toggle-expand') {
+                const id = target.getAttribute('data-id');
+                if (!id) return;
+                
+                // Find the resource list element
+                const resourceList = document.querySelector('[data-id="' + id + '"].resource-list');
+                const expandBtn = target;
+                
+                if (resourceList) {
+                    const isVisible = resourceList.style.display !== 'none';
+                    resourceList.style.display = isVisible ? 'none' : 'block';
+                    expandBtn.classList.toggle('expanded', !isVisible);
+                    expandBtn.textContent = isVisible ? '▼' : '▲';
+                }
+            } else {
+                // Handle other actions (apply buttons, etc.)
+                const id = target.getAttribute('data-id');
+                vscode.postMessage({ type: 'discover.action', action, id });
+            }
         });
         
         // Focus search input on load
