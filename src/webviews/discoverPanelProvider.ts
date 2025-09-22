@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { HatService } from '../services/hatService';
 import { RemoteHatService } from '../services/remoteHatService';
 import { Repository } from '../models';
@@ -764,19 +765,85 @@ export class DiscoverPanelProvider {
   }
 
   private async checkWorkspaceApplicationStatus(hatId: string): Promise<boolean> {
-    // Check if the hat has been applied to the current workspace
-    // This could be implemented by checking for a marker file or configuration
-    // For now, we'll return false as a placeholder
-    // TODO: Implement proper workspace application tracking
-    return false;
+    try {
+      if (!vscode.workspace.workspaceFolders?.length) {
+        return false;
+      }
+      
+      const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const trackingFile = path.join(workspaceRoot, '.vscode', 'copilot-applied-hats.json');
+      
+      const tracking = await this.readTrackingFile(trackingFile);
+      return tracking.appliedHats.includes(hatId);
+    } catch (error) {
+      return false;
+    }
   }
 
   private async checkUserApplicationStatus(hatId: string): Promise<boolean> {
-    // Check if the hat has been applied to user settings
-    // This could be implemented by checking user configuration or hat registry
-    // For now, we'll return false as a placeholder
-    // TODO: Implement proper user application tracking
-    return false;
+    try {
+      // Use VS Code's global storage path for user tracking
+      const globalStoragePath = vscode.env.appRoot.replace(/[\\\/]resources[\\\/]app$/, '');
+      const trackingFile = path.join(globalStoragePath, 'User', 'copilot-applied-hats.json');
+      
+      const tracking = await this.readTrackingFile(trackingFile);
+      return tracking.appliedHats.includes(hatId);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private async readTrackingFile(filePath: string): Promise<{ appliedHats: string[] }> {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { appliedHats: [] };
+      }
+      
+      const content = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(content);
+      return { appliedHats: parsed.appliedHats || [] };
+    } catch (error) {
+      return { appliedHats: [] };
+    }
+  }
+
+  private async writeTrackingFile(filePath: string, tracking: { appliedHats: string[] }): Promise<void> {
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      fs.writeFileSync(filePath, JSON.stringify(tracking, null, 2), 'utf8');
+    } catch (error) {
+      console.warn('Failed to write tracking file:', error);
+    }
+  }
+
+  private async markHatAsAppliedToWorkspace(hatId: string): Promise<void> {
+    if (!vscode.workspace.workspaceFolders?.length) {
+      return;
+    }
+    
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const trackingFile = path.join(workspaceRoot, '.vscode', 'copilot-applied-hats.json');
+    
+    const tracking = await this.readTrackingFile(trackingFile);
+    if (!tracking.appliedHats.includes(hatId)) {
+      tracking.appliedHats.push(hatId);
+      await this.writeTrackingFile(trackingFile, tracking);
+    }
+  }
+
+  private async markHatAsAppliedToUser(hatId: string): Promise<void> {
+    const globalStoragePath = vscode.env.appRoot.replace(/[\\\/]resources[\\\/]app$/, '');
+    const trackingFile = path.join(globalStoragePath, 'User', 'copilot-applied-hats.json');
+    
+    const tracking = await this.readTrackingFile(trackingFile);
+    if (!tracking.appliedHats.includes(hatId)) {
+      tracking.appliedHats.push(hatId);
+      await this.writeTrackingFile(trackingFile, tracking);
+    }
   }
 
   private async applyRemoteHatToWorkspace(id: string) {
@@ -812,6 +879,9 @@ export class DiscoverPanelProvider {
       const result = await this.remoteHatService.applyHatToWorkspace(id);
       
       if (result.success) {
+        // Mark the hat as applied to workspace
+        await this.markHatAsAppliedToWorkspace(id);
+        
         vscode.window.showInformationMessage(
           `Successfully applied hat "${hat.name}" to workspace! Applied ${result.appliedCount} resources.`
         );
@@ -854,6 +924,9 @@ export class DiscoverPanelProvider {
       const result = await this.remoteHatService.applyHatToUser(id);
       
       if (result.success) {
+        // Mark the hat as applied to user
+        await this.markHatAsAppliedToUser(id);
+        
         vscode.window.showInformationMessage(
           `Successfully applied hat "${hat.name}" to user settings! Applied ${result.appliedCount} resources.`
         );
@@ -907,6 +980,8 @@ export class DiscoverPanelProvider {
             <div class="result-header">
               <div class="title">${escape(r.label)}</div>
               ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
+              ${r.isAppliedToWorkspace ? '<div class="status-badge applied-workspace">Applied to Workspace</div>' : ''}
+              ${r.isAppliedToUser ? '<div class="status-badge applied-user">Applied to User</div>' : ''}
             </div>
             ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
             ${r.resourceBreakdown ? `
@@ -1145,6 +1220,16 @@ export class DiscoverPanelProvider {
             color: var(--vscode-badge-foreground);
         }
         
+        .status-badge.applied-workspace {
+            background: var(--vscode-notificationsInfoIcon-foreground);
+            color: white;
+        }
+        
+        .status-badge.applied-user {
+            background: var(--vscode-charts-purple);
+            color: white;
+        }
+        
         .result .desc {
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
@@ -1273,13 +1358,7 @@ export class DiscoverPanelProvider {
         });
         
         // Tab switching
-        document.querySelector('.tabs').addEventListener('click', e => {
-            const target = e.target;
-            if (target.classList.contains('tab')) {
-                const tab = target.getAttribute('data-tab');
-                vscode.postMessage({ type: 'discover.switchTab', tab });
-            }
-        });
+        // Tab switching removed since we only have remote resources now
         
         // Action handling
         document.getElementById('results').addEventListener('click', e => {
