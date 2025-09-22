@@ -230,7 +230,8 @@ export class DiscoverPanelProvider {
     const categoryCounts = new Map<string, number>();
     
     resources.forEach(resourcePath => {
-      const category = resourcePath.split('/')[0];
+      const split = resourcePath.split('/');
+      const category = split.length > 2 && split[split.length - 2] || 'general';
       categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
     });
 

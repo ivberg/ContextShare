@@ -75,58 +75,40 @@ export class RemoteHatService {
 
     try {
       const hats: RemoteHatSummary[] = [];
-      const categories = ['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp'];
+      const adminUrl = this.baseUrl.replace('/catalog', '/admin/catalogs/1');
+      const indexUrl = `${adminUrl}/resources`;
+      const resources: any[] = await this.makeRequest(indexUrl);
 
-      // For each category, get the index
-      for (const category of categories) {
-        try {
-          const indexUrl = `${this.baseUrl}/${category}/index.json`;
-          const filenames: string[] = await this.makeRequest(indexUrl);
-          
-          if (filenames && filenames.length > 0) {
-            const resourcePaths = filenames.map(filename => `${category}/${filename}`);
-
-            // If there are many resources, create smaller themed hats based on filename patterns
-            if (filenames.length > 10) {
-              // Group by common prefixes or keywords in filenames
-              const groups = new Map<string, string[]>();
-              filenames.forEach(filename => {
-                const baseName = filename.replace(/\.(chatmode|instructions|prompt|task|mcp)\.md$/, '');
-                const words = baseName.split(/[-_\s]+/);
-                
-                // Use first meaningful word as grouping key
-                const groupKey = words.find(w => w.length > 3) || words[0] || 'misc';
-                if (!groups.has(groupKey)) {
-                  groups.set(groupKey, []);
-                }
-                groups.get(groupKey)!.push(`${category}/${filename}`);
-              });
-
-              // Create hats for groups with multiple items
-              for (const [groupKey, groupResources] of groups) {
-                if (groupResources.length >= 2) {
-                  hats.push({
-                    id: `catalog-${category}-${groupKey}`,
-                    name: `${groupKey} ${category}`,
-                    description: `${groupKey}-related ${category} resources`,
-                    resources: groupResources,
-                    author: 'Catalog',
-                    rating: undefined
-                  });
-                }
-              }
-            }
-          }
-        } catch (error) {
-          await logger.warn(`RemoteHatService: Failed to load ${category}: ${getErrorMessage(error)}`);
-          // Continue with other categories
+      // Group resources by category for creating themed hats
+      const categorizedResources = new Map<string, any[]>();
+      
+      for (const resource of resources) {
+        const category = resource.category || 'general';
+        if (!categorizedResources.has(category)) {
+          categorizedResources.set(category, []);
         }
+        categorizedResources.get(category)!.push(resource);
+      }
+
+      // Create hats for each category
+      for (const [category, categoryResources] of categorizedResources) {
+        if (categoryResources.length === 0) continue;
+
+        // Create a single hat for the category
+        hats.push({
+          id: `catalog-${category}`,
+          name: `${category} collection`,
+          description: `All available ${category} resources (${categoryResources.length} items)`,
+          resources: categoryResources.map(r => r.content_url || r.filename),
+          author: categoryResources[0].catalog_name || 'Catalog',
+          rating: undefined
+        });
       }
 
       this.hatsCache = hats;
       this.cacheTimestamp = now;
       
-      await logger.info(`RemoteHatService: Generated ${hats.length} hats from catalog API`);
+      await logger.info(`RemoteHatService: Generated ${hats.length} hats from ${resources.length} resources`);
       return hats;
     } catch (error) {
       await logger.error(`RemoteHatService: Failed to load hats from server: ${getErrorMessage(error)}`);
@@ -437,10 +419,16 @@ export class RemoteHatService {
 
   private async downloadResourceContent(resourcePath: string): Promise<string | null> {
     try {
-      // Construct the resource URL
-      const category = resourcePath.split('/')[0];
-      const filename = resourcePath.split('/').slice(1).join('/');
-      const url = `${this.baseUrl}/${category}/${filename}`;
+      // If resourcePath is already a full URL (from content_url), use it directly
+      let url: string;
+      if (resourcePath.startsWith('http://') || resourcePath.startsWith('https://')) {
+        url = resourcePath;
+      } else {
+        // Fallback to old path construction for compatibility
+        const category = resourcePath.split('/')[0];
+        const filename = resourcePath.split('/').slice(1).join('/');
+        url = `${this.baseUrl}/${category}/${filename}`;
+      }
       
       const response = await this.makeRequest(url);
       return response.content || response || null;
