@@ -906,7 +906,6 @@ export class DiscoverPanelProvider {
           <div class="result-main">
             <div class="result-header">
               <div class="title">${escape(r.label)}</div>
-              ${r.isPulled ? '<div class="status-badge pulled">Already Downloaded</div>' : ''}
               ${r.isLocal ? '<div class="status-badge local">Local</div>' : ''}
             </div>
             ${r.description ? `<div class="desc">${escape(r.description)}</div>` : ''}
@@ -919,10 +918,7 @@ export class DiscoverPanelProvider {
           </div>
           <div class="actions">
             ${this.activeTab === 'remote' ? 
-              `<button data-action="activate" data-id="${escape(r.id)}" ${r.isPulled ? 'disabled' : ''}>
-                ${r.isPulled ? 'Already Downloaded' : 'Pull to Workspace'}
-              </button>
-              <button data-action="apply-workspace-remote" data-id="${escape(r.id)}" ${!hasWorkspace || r.isAppliedToWorkspace ? 'disabled' : ''}>
+              `<button data-action="apply-workspace-remote" data-id="${escape(r.id)}" ${!hasWorkspace || r.isAppliedToWorkspace ? 'disabled' : ''}>
                 ${r.isAppliedToWorkspace ? 'Applied to Workspace' : 'Apply to Workspace'}
               </button>
               <button data-action="apply-user-remote" data-id="${escape(r.id)}" ${r.isAppliedToUser ? 'disabled' : ''}>
@@ -1242,18 +1238,14 @@ export class DiscoverPanelProvider {
     
     ${repoStatus}
     
-    <div class="tabs">
-        <button class="tab ${this.activeTab === 'remote' ? 'active' : ''}" data-tab="remote">
-            Remote Resources
-        </button>
-        <button class="tab ${this.activeTab === 'local' ? 'active' : ''}" data-tab="local">
-            Local Resources
-        </button>
+    <!-- Removed tabs - only remote resources now -->
+    <div class="page-title">
+        <h2>Remote AI Resources</h2>
     </div>
     
     <div class="search-section">
         <div class="search-row">
-            <input id="discoverSearch" type="text" placeholder="${this.activeTab === 'remote' ? 'Search remote AI resources...' : 'Search local resources...'}" value="${escape(this.lastQuery)}" />
+            <input id="discoverSearch" type="text" placeholder="Search remote AI resources..." value="${escape(this.lastQuery)}" />
             <button id="searchBtn">Search</button>
         </div>
     </div>
