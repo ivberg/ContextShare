@@ -209,7 +209,22 @@ export class DiscoverPanelProvider {
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
         // Get detailed resource information for expansion
-        const resources = fullHat ? await this.getResourceDetails(fullHat.resources) : [];
+        let resources: ResourceDetail[] = [];
+        if (fullHat) {
+          if (fullHat.resourceDetails && fullHat.resourceDetails.length > 0) {
+            // Use detailed resource metadata from admin API
+            resources = fullHat.resourceDetails.map((resource: any) => ({
+              filename: resource.filename || '',
+              title: resource.title || resource.filename || 'Unnamed Resource',
+              description: resource.description || 'No description available',
+              type: resource.type || 'unknown',
+              url: resource.content_url || ''
+            }));
+          } else {
+            // Fallback to inferring from resource URLs
+            resources = await this.getResourceDetails(fullHat.resources);
+          }
+        }
         
         // Check application status
         const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
@@ -326,7 +341,22 @@ export class DiscoverPanelProvider {
         const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
         
         // Get detailed resource information for expansion
-        const resources = fullHat ? await this.getResourceDetails(fullHat.resources) : [];
+        let resources: ResourceDetail[] = [];
+        if (fullHat) {
+          if (fullHat.resourceDetails && fullHat.resourceDetails.length > 0) {
+            // Use detailed resource metadata from admin API
+            resources = fullHat.resourceDetails.map((resource: any) => ({
+              filename: resource.filename || '',
+              title: resource.title || resource.filename || 'Unnamed Resource',
+              description: resource.description || 'No description available',
+              type: resource.type || 'unknown',
+              url: resource.content_url || ''
+            }));
+          } else {
+            // Fallback to inferring from resource URLs
+            resources = await this.getResourceDetails(fullHat.resources);
+          }
+        }
         
         // Check application status
         const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);

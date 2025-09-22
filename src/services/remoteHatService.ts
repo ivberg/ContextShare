@@ -10,8 +10,21 @@ export interface RemoteHatSummary {
   name: string;
   description?: string;
   resources: string[];
+  resourceDetails?: RemoteResourceDetail[]; // Full resource metadata
   rating?: number;
   author?: string;
+}
+
+export interface RemoteResourceDetail {
+  id: number;
+  type: string;
+  category: string;
+  tags: string;
+  filename: string;
+  title: string;
+  description: string;
+  content_url: string;
+  catalog_name: string;
 }
 
 export class RemoteHatService {
@@ -100,6 +113,7 @@ export class RemoteHatService {
           name: `${category} collection`,
           description: `All available ${category} resources (${categoryResources.length} items)`,
           resources: categoryResources.map(r => r.content_url || r.filename),
+          resourceDetails: categoryResources, // Include full resource metadata
           author: categoryResources[0].catalog_name || 'Catalog',
           rating: undefined
         });
