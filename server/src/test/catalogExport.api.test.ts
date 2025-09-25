@@ -5,7 +5,7 @@ import { createApp } from '../http/app';
 import { createDatabaseService, DatabaseService } from '../database/service';
 import { MigrationRunner } from '../database/migrationRunner';
 
-// Tests the new /admin/catalog-export aggregated endpoint
+// Tests the new /catalog/catalog-export aggregated endpoint
 
 describe('Catalog Export API', () => {
   let app: Application;
@@ -36,7 +36,7 @@ describe('Catalog Export API', () => {
   }
 
   it('returns empty structure when no catalogs', async () => {
-    const res = await request(app).get('/admin/catalog-export');
+    const res = await request(app).get('/catalog/catalog-export');
     assert.strictEqual(res.status, 200);
     assert.deepStrictEqual(res.body.catalogs, []);
     assert.strictEqual(res.body.counts.catalogs, 0);
@@ -46,7 +46,7 @@ describe('Catalog Export API', () => {
     const catalogId = await createCatalog('grouped');
     await createResource(catalogId, 'instructions', 'one.instructions.md', '# One');
     await createResource(catalogId, 'prompts', 'p1.prompt.md', 'Prompt 1');
-    const res = await request(app).get('/admin/catalog-export');
+    const res = await request(app).get('/catalog/catalog-export');
     assert.strictEqual(res.status, 200);
     assert.ok(Array.isArray(res.body.catalogs));
     assert.strictEqual(res.body.counts.catalogs, 1);
@@ -65,7 +65,7 @@ describe('Catalog Export API', () => {
     // Create a large string > 50KB
     const large = 'x'.repeat(60 * 1024);
     await createResource(catalogId, 'instructions', 'large.instructions.md', large);
-    const res = await request(app).get('/admin/catalog-export');
+    const res = await request(app).get('/catalog/catalog-export');
     assert.strictEqual(res.status, 200);
     const cat = res.body.catalogs[0];
   interface ExtendedRS { filename: string; content?: string; truncated?: boolean; size?: number }

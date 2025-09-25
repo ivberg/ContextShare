@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { z } from 'zod';
 import { SqliteCatalogProvider } from '../../catalog/sqliteCatalogProvider';
+import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '../../../../shared/catalogExportTypes';
+import type { Catalog } from '../../database/schema';
 import { DatabaseService } from '../../database/service';
 import { logger } from '../../logging/logger';
 import { LruCache } from '../../cache/lru';
@@ -394,33 +396,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
   // RS (ResourceSummary): { filename, title?, description?, category?, tags?, content_type, resource_type, content_url?, metadata?, created_at, updated_at, content?, truncated?, size? }
   router.get('/catalog-export', async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      interface ResourceExportSummary {
-        filename: string;
-        title?: string;
-        description?: string;
-        category?: string;
-        tags?: string;
-        content_type: string;
-        resource_type: string;
-        content_url?: string;
-        metadata?: Record<string, unknown>;
-        created_at: Date;
-        updated_at: Date;
-        content?: string;
-        truncated?: boolean;
-        size?: number;
-      }
-      interface CatalogExport {
-        name: string;
-        display_name: string | null;
-        description: string | null;
-        source_type: string;
-        source_path?: string;
-        source_url?: string;
-        created_at: Date;
-        updated_at: Date;
-        resources: Record<'chatmodes'|'instructions'|'prompts'|'tasks'|'mcp', ResourceExportSummary[]>;
-      }
+      const db = dbService.getKysely();
       type CatalogMap = Record<number, CatalogExport>;
       // Fetch all catalogs
       const catalogs = await db
@@ -434,7 +410,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
       }
 
       // Fetch all resources for these catalogs in one query
-      const catalogIds = catalogs.map(c => c.id);
+      const catalogIds = catalogs.map((c: Catalog) => c.id);
       const resources = await db
         .selectFrom('resources')
         .selectAll()
@@ -481,8 +457,7 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
         if (r.metadata) {
           try { parsedMeta = JSON.parse(r.metadata); } catch { parsedMeta = null; }
         }
-        const summary = {
-          // id, enabled, and type omitted for simplified payload (type implicit by grouping key)
+        const summary: ResourceExportSummary = {
           filename: r.filename,
           title: r.title ?? undefined,
           description: r.description ?? undefined,
@@ -498,9 +473,11 @@ export function createAdminRoutes(dbService: DatabaseService, indexCache?: LruCa
           truncated: (r.resource_type === 'content' && typeof r.content === 'string' && r.content.length > INLINE_CONTENT_LIMIT) ? true : undefined,
           size: r.resource_type === 'content' ? (typeof r.content === 'string' ? r.content.length : undefined) : undefined
         };
-    // Push into appropriate array (narrow key without assertion)
-    const key: keyof CatalogExport['resources'] = r.type;
-    cat.resources[key].push(summary);
+        const keyCandidate = r.type as string;
+        if(['chatmodes','instructions','prompts','tasks','mcp'].includes(keyCandidate)) {
+          const key = keyCandidate as CatalogResourceType;
+          cat.resources[key].push(summary);
+        }
       }
 
   const exportPayload: CatalogExport[] = Object.values(byCatalog);

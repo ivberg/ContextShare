@@ -148,6 +148,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Multiple catalog support
 		let catalogFilter: string | undefined;
 		let allResources: Resource[] = []; // All resources before filtering
+		let searchFilter: string | undefined; // enhanced: search across filename, description, tags, catalog
 
 		const config = vscode.workspace.getConfiguration();
 		const resolveWorkspacePath = (input?: string): string | undefined => {
@@ -225,6 +226,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		resourceService.setRuntimeDirectoryName(runtimeDirName);
 		resourceService.setRemoteCacheTtl(config.get<number>('copilotCatalog.remoteCacheTtlSeconds', 300));
+		// Lazy remote fetch feature flag (default true)
+		try { (resourceService as any).setEnableLazyRemote?.(config.get<boolean>('copilotCatalog.remote.lazyFetch', true)); } catch {}
 		// Status bar build timestamp (dev) cleaned implementation
 		const activateTimestamp = new Date();
 		const showBuildStampIfEnabled = () => {
@@ -300,11 +303,78 @@ export async function activate(context: vscode.ExtensionContext) {
 			mcpTree.setCatalogFilter(filter);
 		}
 
-		// Helper function to discover resources from multiple catalog directories
-		async function discoverMultipleCatalogs(repository: Repository): Promise<Resource[]> {
+		// Helper: collapse duplicates (catalog+user) on a working copy (does not mutate input)
+		function collapseDuplicates(base: Resource[]): Resource[] {
+			try {
+				const activeCatalogKeys = new Set<string>();
+				for(const r of base){
+					if((r as any).origin !== 'user' && (r.state === ResourceState.ACTIVE || r.state === ResourceState.MODIFIED)){
+						activeCatalogKeys.add(r.category + '::' + path.basename(r.relativePath).toLowerCase());
+					}
+				}
+				if(activeCatalogKeys.size === 0) return base.slice();
+				return base.filter(r => {
+					if((r as any).origin === 'user'){
+						const key = r.category + '::' + path.basename(r.relativePath).toLowerCase();
+						if(activeCatalogKeys.has(key)) return false;
+					}
+					return true;
+				});
+			} catch { return base.slice(); }
+		}
+
+		function applyFilters(raw: Resource[]): Resource[] {
+			let out = catalogFilter ? raw.filter(r => r.catalogName === catalogFilter) : raw;
+			if(searchFilter){
+				const needle = searchFilter.toLowerCase();
+				out = out.filter(r => {
+					// Search in filename/path
+					if (r.relativePath.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					// Search in metadata for lazy resources
+					const lazyRes = r as any;
+					if (lazyRes.description && lazyRes.description.toLowerCase().includes(needle)) {
+						return true;
+					}
+					if (lazyRes.tags && lazyRes.tags.toLowerCase().includes(needle)) {
+						return true;
+					}
+					if (lazyRes.domainCategory && lazyRes.domainCategory.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					// Search in catalog name
+					if (r.catalogName && r.catalogName.toLowerCase().includes(needle)) {
+						return true;
+					}
+					
+					return false;
+				});
+			}
+			return out;
+		}
+
+		function updateTreesFromAll() {
+			// Start from allResources (uncollapsed), collapse duplicates, then filter
+			const collapsed = collapseDuplicates(allResources);
+			const filteredResources = applyFilters(collapsed);
+			const showFilterControl = allResources.length > 2;
+			overviewTree.setFilenameFilterState(searchFilter, showFilterControl); overviewTree.setRepository(currentRepo, filteredResources);
+			chatmodesTree.setFilenameFilterState(searchFilter, showFilterControl); chatmodesTree.setRepository(currentRepo, filteredResources);
+			instructionsTree.setFilenameFilterState(searchFilter, showFilterControl); instructionsTree.setRepository(currentRepo, filteredResources);
+			promptsTree.setFilenameFilterState(searchFilter, showFilterControl); promptsTree.setRepository(currentRepo, filteredResources);
+			tasksTree.setFilenameFilterState(searchFilter, showFilterControl); tasksTree.setRepository(currentRepo, filteredResources);
+			mcpTree.setFilenameFilterState(searchFilter, showFilterControl); mcpTree.setRepository(currentRepo, filteredResources);
+			const hasResources = filteredResources.length > 0;
+			vscode.commands.executeCommand('setContext', 'copilotCatalog.hasResources', hasResources);
+		}
+
+		async function discoverMultipleCatalogs(repository: Repository, progressive?: { onPartial:(r: Resource[])=>void }): Promise<Resource[]> {
 			const cfg = vscode.workspace.getConfiguration();
 			const catalogDirectories = cfg.get<Record<string, string>>('copilotCatalog.catalogDirectory', {});
-			const allResources: Resource[] = [];
+			const gatheredLocal: Resource[] = [];
 			// We'll collect catalog resources first, then add user/runtime resources exactly once
 			const catalogOnly: Resource[] = [];
 			let addedUserRuntime = false;
@@ -317,8 +387,30 @@ export async function activate(context: vscode.ExtensionContext) {
 						// Capture previous overrides so we can restore after each catalog scan
 						const prevRoot = (resourceService as any).rootCatalogOverride;
 						resourceService.setRootCatalogOverride(directory);
-						// Preserve remoteBase-derived overrides (if any) instead of clearing
-						const sourceResources = await resourceService.discoverResources(repository);
+						// Determine catalogName early for progressive pieces
+						const catalogName = getCatalogDisplayName(directory, catalogDirectories);
+						const sourceResources = await resourceService.discoverResources(repository, { onProgress: (chunk) => {
+							try {
+								const adjusted: Resource[] = [];
+								for(const r of chunk){
+									if(r.origin === 'user'){
+										if(addedUserRuntime) continue; // only first batch of user resources
+									}
+									// assign catalogName + stable cross-catalog id for non-user
+									if(r.origin !== 'user'){
+										r.catalogName = catalogName;
+										r.id = `${repository.name}:${catalogName}:${r.relativePath}`;
+									}
+									// push into master incremental list used for rendering as we go
+									allResources.push(r);
+									adjusted.push(r);
+								}
+								if(adjusted.length){
+									if(progressive){ progressive.onPartial(adjusted); }
+									logger.info(`progressive: received ${adjusted.length} resources (total=${allResources.length})`);
+								}
+							} catch {/* ignore UI errors */}
+						}});
 						// Restore root override so subsequent user runtime discovery (later) uses target workspace
 						resourceService.setRootCatalogOverride(prevRoot);
 
@@ -329,13 +421,11 @@ export async function activate(context: vscode.ExtensionContext) {
 						}
 						// Always add catalog / remote resources (non-user)
 						const pureCatalog = sourceResources.filter(r => r.origin !== 'user');
-						
-						// Use custom display name or fall back to directory basename
-						const catalogName = getCatalogDisplayName(directory, catalogDirectories);
 						pureCatalog.forEach(r => {
-							r.catalogName = catalogName;
-							// Ensure unique IDs across catalogs
-							r.id = `${repository.name}:${catalogName}:${r.relativePath}`;
+							if(!r.catalogName) r.catalogName = catalogName;
+							if(!/^[^:]+:[^:]+:/.test(r.id)){
+								r.id = `${repository.name}:${catalogName}:${r.relativePath}`;
+							}
 						});
 						catalogOnly.push(...pureCatalog);
 					} catch (e: any) {
@@ -343,71 +433,30 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 				// Merge catalog resources with (single) user runtime resources
-				allResources.push(...catalogOnly);
+				gatheredLocal.push(...catalogOnly);
 			} else {
 				// Fall back to default catalog discovery
 				const resources = await resourceService.discoverResources(repository);
 				resources.forEach(r => {
 					r.catalogName = 'Default';
 				});
-				allResources.push(...resources);
+				gatheredLocal.push(...resources);
 			}
 			
-			return allResources;
+			return gatheredLocal;
 		}
 
-		async function loadResources() {
+		async function loadResources(progressive?: { onPartial:(r: Resource[])=>void }) {
+			allResources = [];
 			const t0 = Date.now();
-			allResources = currentRepo ? await discoverMultipleCatalogs(currentRepo) : [];
-			const preCounts: Record<string, number> = {};
-			for(const r of allResources){ preCounts[r.category] = (preCounts[r.category]||0)+1; }
-			await logger.info(`loadResources: discovered total=${allResources.length} byCat=${JSON.stringify(preCounts)}`);
-
-			// Collapse duplicate entries (catalog + user runtime copy) by hiding the user-origin entry
-			// when a catalog/remote resource with the same category + basename is ACTIVE or MODIFIED.
-			// Rationale: users expect to see the catalog asset itself (with checkmark) rather than a
-			// synthetic "user" row for activated catalog resources. True user-only assets (no catalog
-			// source) must continue to appear.
-			try {
-				const activeCatalogKeys = new Set<string>();
-				for(const r of allResources){
-					if((r as any).origin !== 'user' && (r.state === ResourceState.ACTIVE || r.state === ResourceState.MODIFIED)){
-						const key = r.category + '::' + path.basename(r.relativePath).toLowerCase();
-						activeCatalogKeys.add(key);
-					}
-				}
-				if(activeCatalogKeys.size){
-					allResources = allResources.filter(r => {
-						if((r as any).origin === 'user'){
-							const key = r.category + '::' + path.basename(r.relativePath).toLowerCase();
-							// Hide the user entry if there is an active catalog counterpart
-							if(activeCatalogKeys.has(key)) return false;
-						}
-						return true; // keep catalog + remote + unmatched user assets
-					});
-				}
-			} catch { /* best-effort duplicate collapse */ }
-			
-			// Apply current filter
-			const filteredResources = catalogFilter ? 
-				allResources.filter(r => r.catalogName === catalogFilter) : 
-				allResources;
-			const postCounts: Record<string, number> = {};
-			for(const r of filteredResources){ postCounts[r.category] = (postCounts[r.category]||0)+1; }
-			await logger.info(`loadResources: filtered=${filteredResources.length} byCat=${JSON.stringify(postCounts)} filter=${catalogFilter||'(none)'} dt=${Date.now()-t0}ms`);
-			
-			// Update all tree providers with filtered resources
-			overviewTree.setRepository(currentRepo, filteredResources);
-			chatmodesTree.setRepository(currentRepo, filteredResources);
-			instructionsTree.setRepository(currentRepo, filteredResources);
-			promptsTree.setRepository(currentRepo, filteredResources);
-			tasksTree.setRepository(currentRepo, filteredResources);
-			mcpTree.setRepository(currentRepo, filteredResources);
-			// optionsTree has no resource dependency
-			
-			// Set context for showing/hiding views
-			const hasResources = filteredResources.length > 0;
-			vscode.commands.executeCommand('setContext', 'copilotCatalog.hasResources', hasResources);
+			const final = currentRepo ? await discoverMultipleCatalogs(currentRepo, progressive) : [];
+			// Ensure all resources discovered (in case progressive skipped due to user resources duplication logic)
+			for(const r of final){
+				if(!allResources.includes(r)) allResources.push(r);
+			}
+			const byCat: Record<string, number> = {}; for(const r of allResources){ byCat[r.category] = (byCat[r.category]||0)+1; }
+			await logger.info(`loadResources: complete total=${allResources.length} byCat=${JSON.stringify(byCat)} dt=${Date.now()-t0}ms`);
+			updateTreesFromAll();
 		}
 
 		async function deriveVirtualRepoFromOverride(absPath: string, runtimeRootPreference?: string): Promise<Repository | undefined> {
@@ -465,6 +514,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		async function refresh() {
 			try {
 				logger.info('Refresh started');
+				// Early loading state: show empty category shells with Loading… placeholders
+				overviewTree.setLoading(true);
+				chatmodesTree.setLoading(true);
+				instructionsTree.setLoading(true);
+				promptsTree.setLoading(true);
+				tasksTree.setLoading(true);
+				mcpTree.setLoading(true);
+				// Assume we will have resources (flip back if zero at end)
+				vscode.commands.executeCommand('setContext', 'copilotCatalog.hasResources', true);
 				// Re-derive remoteBase overrides every refresh in case settings changed without event (edge cases)
 				try {
 					const cfgNow = vscode.workspace.getConfiguration();
@@ -486,9 +544,52 @@ export async function activate(context: vscode.ExtensionContext) {
 						await logger.info('No repositories detected after refresh (post virtual attempt).');
 					}
 				}
-				await loadResources();
+				// Progressive loading: update tree incrementally
+				let debounceTimer: NodeJS.Timeout | undefined;
+				let firstChunk = true;
+				const schedulePartialRefresh = () => {
+					if(debounceTimer) clearTimeout(debounceTimer);
+					const run = () => {
+						try { 
+							updateTreesFromAll();
+							// Clear loading state on first visual update
+							overviewTree.setLoading(false);
+							chatmodesTree.setLoading(false);
+							instructionsTree.setLoading(false);
+							promptsTree.setLoading(false);
+							tasksTree.setLoading(false);
+							mcpTree.setLoading(false);
+						} catch { /* noop */ }
+						refreshAllTrees();
+						updateStatus();
+					};
+					if(firstChunk){
+						firstChunk = false;
+						run(); // immediate for first batch
+					} else {
+						debounceTimer = setTimeout(run, 120);
+					}
+				};
+				await loadResources({ onPartial: (_chunk) => schedulePartialRefresh() });
 				// No-op: hats are discovered on demand when command is invoked
-				logger.info(`Refresh complete. Repo count=${repositories.length} resources=${resources.length}`);
+				logger.info(`Refresh complete. Repo count=${repositories.length} resources=${allResources.length}`);
+				
+				// Ensure loading state is always cleared at the end of refresh
+				overviewTree.setLoading(false);
+				chatmodesTree.setLoading(false);
+				instructionsTree.setLoading(false);
+				promptsTree.setLoading(false);
+				tasksTree.setLoading(false);
+				mcpTree.setLoading(false);
+				
+				if(allResources.length === 0){
+					// Nothing discovered; revert context + loading states
+					vscode.commands.executeCommand('setContext', 'copilotCatalog.hasResources', false);
+				} else {
+					// Update trees one final time to ensure UI is current
+					updateTreesFromAll();
+					refreshAllTrees();
+				}
 				try { updateStatus(); } catch (error) { 
 					logger.warn(`Failed to update status: ${error}`);
 				}
@@ -508,8 +609,8 @@ export async function activate(context: vscode.ExtensionContext) {
 						allResources;
 					const active = filteredResources.filter(r => r.state === ResourceState.ACTIVE).length;
 					const statusText = catalogFilter ? 
-						`ContextShare $(library) ${active}/${filteredResources.length} [${catalogFilter}]` :
-						`ContextShare $(library) ${active}/${filteredResources.length}`;
+						`ContextShare $(library) ${active}/${filteredResources.length} [${catalogFilter}${searchFilter? ' | '+searchFilter: ''}]` :
+						`ContextShare $(library) ${active}/${filteredResources.length}${searchFilter? ' ['+searchFilter+']':''}`;
 					status.text = statusText;
 					status.tooltip = 'ContextShare: Refresh';
 					status.show();
@@ -545,6 +646,14 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.commands.registerCommand('copilotCatalog.openResource', async (item: any) => {
 				const res = pickResourceFromItem(item);
 				if(!res) return;
+				// For lazy remote resources: ensure content is fetched before opening (unless opening runtime copy)
+				try {
+					if(res.origin === 'remote' && (res as any).lazy){
+						await (resourceService as any).ensureRemoteContent?.(res);
+					}
+				} catch(e:any){
+					await logger.warn('ensureRemoteContent failed: ' + getErrorMessage(e));
+				}
 				// If user resource or active copy exists, open the runtime (editable) file; else open read-only catalog view
 				const runtimeTarget = resourceService.getTargetPath(res);
 				const activeExists = await fileService.pathExists(runtimeTarget);
@@ -1078,6 +1187,16 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			})
 			,
+			// Quick search filter command
+			vscode.commands.registerCommand('copilotCatalog.filterFilename', async () => {
+				const val = await vscode.window.showInputBox({ prompt: 'Filter resources by name, description, tags, or catalog (empty to clear)', value: searchFilter || '' });
+				if(val === undefined) return; // cancelled
+				searchFilter = val.trim() || undefined;
+				await loadResources();
+				updateStatus();
+				vscode.window.showInformationMessage(searchFilter ? `Search filter applied: ${searchFilter}` : 'Search filter cleared');
+			})
+			,
 			vscode.commands.registerCommand('copilotCatalog.openSettings', async () => {
 				try {
 					await vscode.commands.executeCommand('workbench.action.openSettings', 'copilotCatalog');
@@ -1243,20 +1362,26 @@ export async function activate(context: vscode.ExtensionContext) {
 		if(currentRepo){
 			const runtimeGlob = new vscode.RelativePattern(currentRepo.runtimePath, '**/*');
 			const watcher = vscode.workspace.createFileSystemWatcher(runtimeGlob, false, false, false);
-			
+			const cacheDirFragment = `${path.sep}.copilot_catalog_cache${path.sep}`;
 			// Debounce refresh to prevent loops from rapid file changes
 			let refreshTimeout: NodeJS.Timeout | undefined;
-			const schedule = () => {
+			let lastRun = 0;
+			const schedule = (uri?: vscode.Uri) => {
+				// Ignore internal cache writes (remote fetch staging) to avoid redundant refetch loop
+				if(uri && uri.fsPath.includes(cacheDirFragment)) return;
+				const now = Date.now();
+				// Guard: if a refresh completed < 1s ago, skip (burst suppression)
+				if(now - lastRun < 1000) return;
 				if(refreshTimeout) clearTimeout(refreshTimeout);
 				refreshTimeout = setTimeout(async () => {
-					logger.info('File watcher triggered refresh');
+					lastRun = Date.now();
+					logger.info('File watcher triggered refresh (debounced)');
 					await refresh();
-				}, 2000); // Increased debounce time to 2 seconds
+				}, 1500); // 1.5s debounce (cache writes often cluster)
 			};
-			
-			watcher.onDidChange(schedule, null, context.subscriptions);
-			watcher.onDidCreate(schedule, null, context.subscriptions);
-			watcher.onDidDelete(schedule, null, context.subscriptions);
+			watcher.onDidChange((u)=>schedule(u), null, context.subscriptions);
+			watcher.onDidCreate((u)=>schedule(u), null, context.subscriptions);
+			watcher.onDidDelete((u)=>schedule(u), null, context.subscriptions);
 			context.subscriptions.push(watcher);
 		}
 
