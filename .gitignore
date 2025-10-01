@@ -501,6 +501,8 @@ temp/
 *.subscription
 service-principal.json
 app-registration.json
+server/.azure-deploy/
+server/contextshare-deploy-*.zip
 
 # Backup files that might contain sensitive data
 *.backup

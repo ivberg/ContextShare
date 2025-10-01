@@ -9,7 +9,7 @@ This guide explains how to run and test the Phase 0 ContextShare reference backe
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Node.js | 18+ LTS | CommonJS build; ES features used are Node 18+ safe |
+| Node.js | 18+ LTS (20 LTS recommended) | CommonJS build; ES features used are Node 18+ safe |
 | npm | 9+ | For dependency install |
 | Catalog Content | Your catalog directory (mirrors `example-catalog/`) | Must contain category folders |
 | Public HTTPS Endpoint | ngrok / reverse proxy / CDN | Required for extension to accept URL |

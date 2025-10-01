@@ -15,16 +15,18 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "db:migrate": "kysely-migration-cli migrate",
     "db:create-migration": "kysely-migration-cli create",
-    "db:query": "node dist/tools/db-query.js"
+    "db:query": "node dist/tools/db-query.js",
+    "deploy:azure": "node scripts/deploy-azure.mjs"
   },
   "dependencies": {
     "@types/cors": "^2.8.19",
-    "better-sqlite3": "^12.2.0",
+  "better-sqlite3": "^11.5.0",
     "commander": "^12.1.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "kysely": "^0.27.4",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "yazl": "^2.5.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",

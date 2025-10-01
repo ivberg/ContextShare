@@ -16,6 +16,19 @@ import { createAdminRoutes } from './routes/admin';
 import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '../../../shared/catalogExportTypes';
 import type { Catalog } from '../database/schema';
 
+function adminKeyGuard(expectedKey?: string){
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if(!expectedKey){ return next(); }
+    const header = req.headers['x-admin-api-key'] || req.headers['authorization'];
+    if(typeof header === 'string'){
+      // Allow either raw key via X-Admin-Api-Key or Authorization: Bearer <key>
+      const token = header.startsWith('Bearer ') ? header.slice(7) : header;
+      if(token === expectedKey){ return next(); }
+    }
+    return res.status(401).json({ error: 'unauthorized' });
+  };
+}
+
 // Factory function to create the appropriate catalog provider
 function createProvider(config: ServerConfig, dbService?: DatabaseService): CatalogProvider {
   switch (config.mode) {
@@ -45,6 +58,27 @@ export async function initializeDatabase(config: ServerConfig): Promise<Database
   if (config.mode === 'database' || config.mode === 'hybrid') {
     if (!config.databasePath) {
       throw new Error('DATABASE_PATH is required for database mode');
+    }
+    
+    // Ensure the database directory exists before initializing
+    const dbDir = _path.dirname(config.databasePath);
+    await _fs.mkdir(dbDir, { recursive: true });
+    logger.info({ databasePath: config.databasePath, directory: dbDir }, 'Database directory ensured');
+    
+    // Check if database exists, if not try to copy from seed file (Azure deployment)
+    try {
+      await _fs.access(config.databasePath);
+      logger.info({ databasePath: config.databasePath }, 'Database file exists');
+    } catch {
+      // Database doesn't exist, try to copy from seed file
+      const seedPath = _path.join(process.cwd(), 'catalog.db.seed');
+      try {
+        await _fs.access(seedPath);
+        await _fs.copyFile(seedPath, config.databasePath);
+        logger.info({ seedPath, databasePath: config.databasePath }, 'Initialized database from seed file');
+      } catch {
+        logger.info({ databasePath: config.databasePath }, 'No seed file found, will create new empty database');
+      }
     }
     
     const dbService = createDatabaseService({ 
@@ -102,7 +136,7 @@ export function createApp(opts: { config: ServerConfig, provider?: CatalogProvid
 
   // Add admin routes for database mode
   if ((config.mode === 'database' || config.mode === 'hybrid') && opts.dbService) {
-    app.use('/admin', createAdminRoutes(opts.dbService, indexCache));
+    app.use('/admin', adminKeyGuard(config.adminApiKey), createAdminRoutes(opts.dbService, indexCache));
   }
 
   app.get('/healthz', (_req, res) => {

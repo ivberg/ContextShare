@@ -31,6 +31,7 @@ const configSchema = z.object({
   CATALOG_ROOT: z.string().min(1, 'CATALOG_ROOT is required (e.g. ../example-catalog)').describe('Path to catalog root').optional(),
   DATABASE_PATH: z.string().describe('Path to SQLite database file').optional(),
   MODE: z.enum(['file', 'database', 'hybrid']).default('file').describe('Server mode: file, database, or hybrid'),
+  ADMIN_API_KEY: z.string().min(10).describe('Shared secret for protecting /admin routes').optional(),
 });
 
 export interface ServerConfig { 
@@ -38,6 +39,7 @@ export interface ServerConfig {
   catalogRoot?: string;
   databasePath?: string;
   mode: 'file' | 'database' | 'hybrid';
+  adminApiKey?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -84,5 +86,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     catalogRoot: parsed.data.CATALOG_ROOT,
     databasePath: parsed.data.DATABASE_PATH,
     mode,
+    adminApiKey: parsed.data.ADMIN_API_KEY,
   };
 }
