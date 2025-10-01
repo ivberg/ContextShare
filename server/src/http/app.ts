@@ -13,7 +13,7 @@ import { LruCache } from '../cache/lru';
 import { requestId } from './middleware/requestId';
 import { authGuard } from './middleware/authGuard';
 import { createAdminRoutes } from './routes/admin';
-import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '../../../shared/catalogExportTypes';
+import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '@contextshare/shared/catalogExportTypes';
 import type { Catalog } from '../database/schema';
 
 function adminKeyGuard(expectedKey?: string){

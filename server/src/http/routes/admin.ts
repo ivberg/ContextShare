@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { z } from 'zod';
 import { SqliteCatalogProvider } from '../../catalog/sqliteCatalogProvider';
-import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '../../../../shared/catalogExportTypes';
+import type { CatalogExport, CatalogResourceType, ResourceExportSummary } from '@contextshare/shared/catalogExportTypes';
 import type { Catalog } from '../../database/schema';
 import { DatabaseService } from '../../database/service';
 import { logger } from '../../logging/logger';

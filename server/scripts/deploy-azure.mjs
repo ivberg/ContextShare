@@ -547,8 +547,16 @@ async function buildAndPackage(opts){
 	copyFileSync(path.join(SERVER_DIR, 'package.json'), path.join(workDir, 'package.json'));
 	try { copyFileSync(path.join(SERVER_DIR, 'package-lock.json'), path.join(workDir, 'package-lock.json')); } catch {}
 	try { copyFileSync(path.join(SERVER_DIR, '.deployment'), path.join(workDir, '.deployment')); } catch {}
-	// Copy TypeScript config for remote build
-	try { copyFileSync(path.join(SERVER_DIR, 'tsconfig.json'), path.join(workDir, 'tsconfig.json')); } catch {}
+	// Copy and adjust TypeScript config for remote build (different directory structure in deployment)
+	try {
+		const tsconfigPath = path.join(SERVER_DIR, 'tsconfig.json');
+		const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf8'));
+		// Adjust paths for deployment package structure (src/ and shared/ at root level)
+		tsconfig.compilerOptions.rootDir = '.';
+		tsconfig.compilerOptions.baseUrl = '.';
+		tsconfig.include = ['src', 'shared/catalogExportTypes.ts'];
+		writeFileSync(path.join(workDir, 'tsconfig.json'), JSON.stringify(tsconfig, null, 2));
+	} catch {}
 	const installArgs = ['install', '--omit=dev', '--no-audit', '--no-fund'];
 	let dependenciesInstalled = false;
 	let remoteBuildActive = opts.remoteBuild;
@@ -599,6 +607,13 @@ async function buildAndPackage(opts){
 			recursiveCopy(srcDir, path.join(workDir, 'src'));
 			log(green('Copied source files for remote build'));
 		}
+		// Copy shared types directory (required by tsconfig includes)
+		const repoRoot = path.resolve(SERVER_DIR, '..');
+		const sharedDir = path.join(repoRoot, 'shared');
+		if(existsSync(sharedDir)){
+			recursiveCopy(sharedDir, path.join(workDir, 'shared'));
+			log(green('Copied shared types directory for remote build'));
+		}
 	} else {
 		// For local build, copy compiled dist directory
 		writeFileSync(path.join(workDir, 'server.js'), `// bootstrap\nimport('./dist/index.js');\n`);
@@ -618,7 +633,7 @@ async function buildAndPackage(opts){
 		copyFileSync(localDbPath, path.join(workDir, 'catalog.db.seed'));
 		log(green(`Copied SQLite database as seed file from ${localDbPath} to deployment package`));
 	} else if((opts.mode === 'database' || opts.mode === 'hybrid')){
-		log(yellow('INCLUDE_CATALOG=false - will create empty database on first startup'));
+		log(yellow('INCLUDE_CATALOG=false - no seed file included. Will use existing database or create empty one if none exists.'));
 	}
 	
 	// Copy file-based catalog directory for file mode or hybrid mode
@@ -647,14 +662,21 @@ async function buildAndPackage(opts){
 		const adminDir = path.join(SERVER_DIR, 'web-admin');
 		if(!existsSync(adminDir)) { log(yellow('Admin UI directory missing, skipping include-admin-ui')); }
 		else {
-			log(green('Building admin UI (Next.js)...'));
+			log(green('Building admin UI (Next.js static export)...'));
 			spawnSafe('npm', ['install', '--no-audit', '--no-fund'], { cwd: adminDir });
-			spawnSafe('npm', ['run', 'build'], { cwd: adminDir });
-			const standalone = path.join(adminDir, '.next', 'standalone');
-			const staticDir = path.join(adminDir, '.next', 'static');
-			if(existsSync(standalone)) recursiveCopy(standalone, path.join(workDir, 'admin-ui'));
-			else log(yellow('Standalone build not found (.next/standalone). Did next.config output=standalone?'));
-			if(existsSync(staticDir)) recursiveCopy(staticDir, path.join(workDir, 'admin-ui', '.next', 'static'));
+			// Set NEXT_PUBLIC_API_BASE_URL before building so it's baked into the static export
+			const adminBuildEnv = {
+				...process.env,
+				NEXT_PUBLIC_API_BASE_URL: '/'
+			};
+			log(yellow('Setting NEXT_PUBLIC_API_BASE_URL=/ for static build'));
+			spawnSafe('npm', ['run', 'build'], { cwd: adminDir, env: adminBuildEnv });
+			const outDir = path.join(adminDir, 'out');
+			if(existsSync(outDir)) {
+				recursiveCopy(outDir, path.join(workDir, 'admin-ui'));
+				log(green('Copied Next.js static export to admin-ui/'));
+			}
+			else log(yellow('Static export not found (out/). Did next.config output=export?'));
 		}
 	}
 	const zipPath = path.join(SERVER_DIR, `contextshare-deploy-${Date.now()}.zip`);

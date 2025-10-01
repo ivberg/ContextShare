@@ -11,13 +11,17 @@ async function main(): Promise<void> {
     const dbService = await initializeDatabase(config);
     
     const app = createApp({ config, dbService });
+    
+    // Mount static admin UI if enabled
     if(process.env.ENABLE_ADMIN_UI === 'true'){
       try {
+        // Mount the static Next.js export at /admin-ui
         await mountAdminUi(app);
       } catch (e){
-        logger.error({ event: 'admin_ui_mount_failed', err: String(e) });
+        logger.error({ event: 'admin_ui_setup_failed', err: String(e) });
       }
     }
+    
     const port = config.port;
     app.listen(port, () => {
       logger.info({ 

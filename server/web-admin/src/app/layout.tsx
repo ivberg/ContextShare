@@ -1,19 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Navigation from "@/components/layout/Navigation";
+import AdminAuthGate from "@/components/auth/AdminAuthGate";
 import React from 'react';
-
-function AdminAuthGate({ children }: { children: React.ReactNode }) {
-  if (typeof window !== 'undefined') {
-    const key = localStorage.getItem('admin_api_key');
-    if (!key && window.location.pathname !== '/login') {
-      window.location.replace('/login');
-      return null;
-    }
-  }
-  return <>{children}</>;
-}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,7 +30,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AdminAuthGate>
-          <Navigation>{children}</Navigation>
+          {children}
         </AdminAuthGate>
       </body>
     </html>

@@ -2,8 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   basePath: '/admin-ui',
-  output: 'standalone',
-  // We will set NEXT_PUBLIC_API_BASE_URL to '/' when embedded so relative fetches work
+  output: 'export',
+  // Static export mode - generates plain HTML/CSS/JS that can be served by any web server
+  // API calls will be relative to the main Express server
+  
+  // Set workspace root to web-admin directory to avoid lockfile warnings
+  outputFileTracingRoot: __dirname,
 };
 
 export default nextConfig;

@@ -8,7 +8,8 @@ import {
   X, 
   Database, 
   Home,
-  Activity
+  Activity,
+  LogOut
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -26,6 +27,14 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
   ];
 
   const isActive = (href: string) => pathname === href;
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('admin_api_key');
+      const loginPath = window.location.pathname.startsWith('/admin-ui') ? '/admin-ui/login' : '/login';
+      window.location.href = loginPath;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -77,6 +86,15 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
                   );
                 })}
               </nav>
+              <div className="border-t border-gray-200 px-6 py-4">
+                <button
+                  onClick={handleLogout}
+                  className="group flex w-full items-center rounded-md px-2 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                >
+                  <LogOut className="mr-3 h-5 w-5 flex-shrink-0" />
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -107,6 +125,15 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
               );
             })}
           </nav>
+          <div className="border-t border-gray-200 px-6 py-4">
+            <button
+              onClick={handleLogout}
+              className="group flex w-full items-center rounded-md px-2 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            >
+              <LogOut className="mr-3 h-5 w-5 flex-shrink-0" />
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 

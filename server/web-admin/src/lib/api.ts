@@ -20,10 +20,36 @@ const api = axios.create({
   },
 });
 
+// Request interceptor to add authentication header
+api.interceptors.request.use(
+  (config) => {
+    // Add API key from localStorage if available
+    if (typeof window !== 'undefined') {
+      const apiKey = localStorage.getItem('admin_api_key');
+      if (apiKey) {
+        config.headers['X-Admin-API-Key'] = apiKey;
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Handle authentication errors by redirecting to login
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('admin_api_key');
+        const loginPath = window.location.pathname.startsWith('/admin-ui') ? '/admin-ui/login' : '/login';
+        window.location.href = loginPath;
+      }
+    }
+    
     if (error.response?.data) {
       throw error.response.data as ApiError;
     }
