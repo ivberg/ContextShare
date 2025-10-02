@@ -53,7 +53,8 @@ export class OptionsTreeProvider {
         icon: 'library',
         children: [
           { id: 'catalog-refresh', label: 'Refresh', icon: 'refresh', command: 'copilotCatalog.refresh' },
-          { id: 'catalog-filter', label: 'Filter by Catalog', icon: 'filter', command: 'copilotCatalog.filterCatalog' }
+          { id: 'catalog-filter', label: 'Filter by Catalog', icon: 'filter', command: 'copilotCatalog.filterCatalog' },
+          { id: 'catalog-discover', label: 'Discover Resources', icon: 'search', command: 'copilotCatalog.openDiscoverPanel' }
         ]
       },
       {

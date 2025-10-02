@@ -9,10 +9,14 @@ import * as vscode from 'vscode';
 import { Repository, Resource, ResourceCategory, ResourceState } from './models';
 import { FileService } from './services/fileService';
 import { HatService } from './services/hatService';
+import { LocalRepoService } from './services/localRepoService';
 import { ResourceService } from './services/resourceService';
 import { CategoryTreeProvider } from './tree/categoryTreeProvider';
 import { OptionsTreeProvider } from './tree/optionsTreeProvider';
 import { OverviewTreeProvider } from './tree/overviewTreeProvider';
+// Discover moved to webview provider implementation
+import { DiscoverPanelProvider } from './webviews/discoverPanelProvider';
+import { RemoteHatService } from './services/remoteHatService';
 import { getCatalogDisplayName } from './utils/display';
 import { preserveFileWithVariant } from './utils/fileOperations';
 import { handleErrorWithNotification, getErrorMessage } from './utils/errors';
@@ -126,21 +130,39 @@ export async function activate(context: vscode.ExtensionContext) {
 	try {
 		const fileService = new FileService();
 		const resourceService = new ResourceService(fileService);
+		
+		// Initialize local repository service for isolated resource storage
+		const localRepoService = new LocalRepoService(fileService);
+		await localRepoService.initialize();
 		// Configure structured logger now that we have context and config.
 		enableFileLogging = !!vscode.workspace.getConfiguration().get<boolean>('copilotCatalog.enableFileLogging', false);
 		logFilePath = path.join(context.globalStorageUri.fsPath, LOG_FILENAME);
 		logger.init(context, { enableFileLogging, filePath: logFilePath, channelName: 'ContextShare' });
 		// Wire service-level logger so core operations emit to the output channel/file
 		(resourceService as any).setLogger?.(logger.asFunction());
-		// Create tree providers for each category and overview
+		// Create service instances and tree/webview providers
 		const overviewTree = new OverviewTreeProvider();
+		const remoteHatService = new RemoteHatService();
+		
+		// Configure remote hat service with server URL
+		const vsConfig = vscode.workspace.getConfiguration();
+		const remoteCatalogServer = vsConfig.get<string>('copilotCatalog.remoteBase', '');
+		if (remoteCatalogServer && remoteCatalogServer.trim()) {
+			remoteHatService.setBaseUrl(remoteCatalogServer.trim());
+			logger.info(`Remote hat service configured with server: ${remoteCatalogServer.trim()}`);
+		} else {
+			logger.info('Remote hat service not configured (no server URL)');
+		}
+		
+		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
+		// Configure hat service to use local repository
+		hatService.setLocalRepoPath(localRepoService.getLocalRepoPath());
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
 		const tasksTree = new CategoryTreeProvider(ResourceCategory.TASKS);
 	const mcpTree = new CategoryTreeProvider(ResourceCategory.MCP);
 	const optionsTree = new OptionsTreeProvider();
-		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
 
 		// Track whether we've warned user about read-only catalog views
 		let shownReadonlyNotice = false;
@@ -642,6 +664,9 @@ export async function activate(context: vscode.ExtensionContext) {
 				resourceService.clearRemoteCache();
 				vscode.window.showInformationMessage('Remote cache cleared');
 				logger.info('Remote cache cleared via command');
+			}),
+			vscode.commands.registerCommand('copilotCatalog.openDiscoverPanel', async () => {
+				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo, localRepoService.getLocalRepository());
 			}),
 			vscode.commands.registerCommand('copilotCatalog.openResource', async (item: any) => {
 				const res = pickResourceFromItem(item);
@@ -1210,6 +1235,26 @@ export async function activate(context: vscode.ExtensionContext) {
 							if(!(await fileService.pathExists(settingsPath))){ await fs.writeFile(settingsPath, '{\n}\n'); }
 							await vscode.window.showTextDocument(vscode.Uri.file(settingsPath));
 						} catch(err:any){ await logger.warn('Failed to open settings.json: ' + (err?.message||err)); }
+					}
+				}
+			}),
+			vscode.commands.registerCommand('copilotCatalog.discover.search', async () => {
+				// Open the discover panel for interactive searching
+				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo, localRepoService.getLocalRepository());
+			}),
+			vscode.commands.registerCommand('copilotCatalog.resetLocalRepo', async () => {
+				const choice = await vscode.window.showWarningMessage(
+					'Reset Local Repository?',
+					{ detail: 'This will delete all local hats and resources from the app data directory. This action cannot be undone.' },
+					'Reset', 'Cancel'
+				);
+				if (choice === 'Reset') {
+					try {
+						await localRepoService.reset();
+						vscode.window.showInformationMessage('Local repository has been reset successfully.');
+						await refresh(); // Refresh UI
+					} catch (error) {
+						await handleErrorWithNotification(error, 'Reset Local Repository Failed', logger.error.bind(logger), vscode);
 					}
 				}
 			}),
