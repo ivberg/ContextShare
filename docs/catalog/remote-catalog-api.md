@@ -306,7 +306,7 @@ Provides a single fetch of all enabled catalogs and their enabled resources with
 
 Endpoint:
 ```
-GET /admin/catalog-export
+GET /catalog/catalog-export
 ```
 
 Minimal Response Structure:

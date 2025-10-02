@@ -50,6 +50,13 @@ export interface Resource {
 	catalogName?: string;   // Name of the catalog source this resource came from
 	// User resources can be disabled via rename (e.g., .disabled suffix)
 	disabled?: boolean;
+	// --- Lazy remote metadata (present when remote content not yet fetched) ---
+	remoteUrl?: string;      // Source URL to fetch on-demand
+	lazy?: boolean;          // True if body not yet downloaded
+	description?: string;    // Optional description from server metadata
+	tags?: string;           // Comma-separated tags (raw form)
+	size?: number;           // Original size if known (for informational tooltips)
+	truncated?: boolean;     // Indicates server truncated inline content
 }
 
 export interface OperationResult { success: boolean; resource: Resource; message: string; details?: string }

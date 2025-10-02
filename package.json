@@ -258,6 +258,11 @@
         "icon": "$(filter)"
       },
       {
+        "command": "copilotCatalog.filterFilename",
+        "title": "ContextShare: Filter by Filename",
+        "icon": "$(search)"
+      },
+      {
         "command": "copilotCatalog.user.disable",
         "title": "User: Disable"
       },

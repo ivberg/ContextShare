@@ -452,6 +452,9 @@ FodyWeavers.xsd
 !.github/workflows/
 .vscode/settings.json
 
+# ContextShare cache directory
+.github/.copilot_catalog_cache
+
 # Security: Prevent accidental commits of sensitive files
 *.key
 *.pem

@@ -11,10 +11,23 @@ export class OverviewTreeProvider {
   private resources: Resource[] = [];
   private repo?: Repository;
   private catalogFilter?: string;
+  private filenameFilter?: string;
+  private showFilterItem = false;
+  private loading = false;
   
   setCatalogFilter(filter?: string) {
     this.catalogFilter = filter;
     this.refresh();
+  }
+
+  setFilenameFilterState(filter: string | undefined, show: boolean){
+    this.filenameFilter = filter;
+    this.showFilterItem = show;
+    this.refresh();
+  }
+
+  setLoading(flag: boolean){
+    if(this.loading !== flag){ this.loading = flag; this.refresh(); }
   }
   
   setRepository(repo: Repository|undefined, resources: Resource[]){ 
@@ -40,6 +53,9 @@ export class OverviewTreeProvider {
             ];
     }
     
+    if(this.loading){
+      return [ this.infoItem('Loading catalog resources…') ];
+    }
     if(this.resources.length === 0){
       return [
         this.infoItem('No catalog resources discovered.'),
@@ -56,11 +72,12 @@ export class OverviewTreeProvider {
     
     // Show summary when resources exist
     const summary = this.generateSummary();
-    return [
-      this.infoItem('Catalog Summary'),
-      this.infoItem(''),
-      ...summary
-    ];
+    const items: CatalogTreeItem[] = [];
+    if(this.showFilterItem){ items.push(this.filterControlItem()); }
+    items.push(this.infoItem('Catalog Summary'));
+    items.push(this.infoItem(''));
+    items.push(...summary);
+    return items;
   }
   
   private generateSummary(): CatalogTreeItem[] {
@@ -108,6 +125,16 @@ export class OverviewTreeProvider {
       (item as any).iconPath = new vscode.ThemeIcon('info');
     }
     item.contextValue = 'info';
+    return item;
+  }
+
+  private filterControlItem(){
+    const active = !!this.filenameFilter;
+    const label = active ? `Filter: "${this.filenameFilter}" (Edit)` : 'Filter: (None)';
+    const item = new CatalogTreeItem(label, vscode ? vscode.TreeItemCollapsibleState.None : 0, { type:'filter-control'});
+    (item as any).contextValue = 'filter-control';
+    (item as any).command = { command: 'copilotCatalog.filterFilename', title: 'Edit Filter' };
+    if(vscode){ (item as any).iconPath = new vscode.ThemeIcon('filter'); }
     return item;
   }
 }

@@ -23,6 +23,8 @@ Core value: a single, structured, multi-catalog layer for AI assistant resources
 - Real-time sync and state tracking (INACTIVE / ACTIVE / MODIFIED)
 - Safe activation (never overwrites user-created originals)
 - Secure: HTTPS-only remotes plus path and filename sanitization
+- Progressive streaming discovery (large remote catalogs no longer block the UI)
+- Quick filename filter command
 
 ### Feature Matrix
 
@@ -69,6 +71,18 @@ Install from the VS Code Marketplace: [ContextShare](https://marketplace.visuals
 3. Activate a resource (right-click -> Activate).
 4. (Optional) Apply a Hat preset to activate multiple at once.
 5. Edit runtime copies under `.github/**` if you need local tweaks (they'll show as MODIFIED).
+6. (Optional) Use `ContextShare: Filter by Filename` to narrow large catalogs (substring match on relative path).
+
+### Progressive Loading (Large Catalog Optimization)
+When working with 200+ assets (common with multi-repo remote catalogs), earlier versions blocked the UI until every remote fetch completed. Discovery now streams results:
+
+* Each remote file fetch emits a small progress batch.
+* Tree views refresh with a 150ms debounce window (preventing flicker while keeping UI responsive).
+* The status bar updates counts as items arrive.
+* Runtime file watcher ignores internal cache writes and debounces to avoid redundant refetch loops.
+
+### Quick Filename Filtering
+Use the command palette: `ContextShare: Filter by Filename` and enter a substring (case-insensitive). Clear it by submitting an empty value. This is an in-memory client-side filter (no extra server calls) and combines with catalog filtering.
 
 ### Hats (Presets)
 Hats are small JSON descriptors bundling chosen chat mode + instructions + prompts + tasks (+ soon MCP servers) into a one-click activation set. Great for role or workflow switching (e.g., "Full Stack Review", "Security Audit").
