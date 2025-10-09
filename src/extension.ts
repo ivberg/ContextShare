@@ -9,7 +9,6 @@ import * as vscode from 'vscode';
 import { Repository, Resource, ResourceCategory, ResourceState } from './models';
 import { FileService } from './services/fileService';
 import { HatService } from './services/hatService';
-import { LocalRepoService } from './services/localRepoService';
 import { ResourceService } from './services/resourceService';
 import { CategoryTreeProvider } from './tree/categoryTreeProvider';
 import { OptionsTreeProvider } from './tree/optionsTreeProvider';
@@ -128,12 +127,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	preflightLog('Activating...');
 
 	try {
+		const config = vscode.workspace.getConfiguration();
+		const runtimeDirName = config.get<string>('copilotCatalog.runtimeDirectory', '.github');
+
 		const fileService = new FileService();
 		const resourceService = new ResourceService(fileService);
 		
-		// Initialize local repository service for isolated resource storage
-		const localRepoService = new LocalRepoService(fileService);
-		await localRepoService.initialize();
 		// Configure structured logger now that we have context and config.
 		enableFileLogging = !!vscode.workspace.getConfiguration().get<boolean>('copilotCatalog.enableFileLogging', false);
 		logFilePath = path.join(context.globalStorageUri.fsPath, LOG_FILENAME);
@@ -142,21 +141,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		(resourceService as any).setLogger?.(logger.asFunction());
 		// Create service instances and tree/webview providers
 		const overviewTree = new OverviewTreeProvider();
-		const remoteHatService = new RemoteHatService();
+		const remoteHatService = new RemoteHatService(resourceService);
 		
 		// Configure remote hat service with server URL
-		const vsConfig = vscode.workspace.getConfiguration();
-		const remoteCatalogServer = vsConfig.get<string>('copilotCatalog.remoteBase', '');
-		if (remoteCatalogServer && remoteCatalogServer.trim()) {
-			remoteHatService.setBaseUrl(remoteCatalogServer.trim());
-			logger.info(`Remote hat service configured with server: ${remoteCatalogServer.trim()}`);
-		} else {
-			logger.info('Remote hat service not configured (no server URL)');
-		}
 		
 		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
 		// Configure hat service to use local repository
-		hatService.setLocalRepoPath(localRepoService.getLocalRepoPath());
 		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
 		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
 		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
@@ -172,7 +162,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		let allResources: Resource[] = []; // All resources before filtering
 		let searchFilter: string | undefined; // enhanced: search across filename, description, tags, catalog
 
-		const config = vscode.workspace.getConfiguration();
 		const resolveWorkspacePath = (input?: string): string | undefined => {
 			if(!input) return undefined;
 			let out = input;
@@ -192,7 +181,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			if(!path.isAbsolute(out) && folders[0]){ out = path.resolve(folders[0].uri.fsPath, out); }
 			return out;
 		};
-		const runtimeDirName = config.get<string>('copilotCatalog.runtimeDirectory', '.github');
 		// Configure logging destination
 		enableFileLogging = !!config.get<boolean>('copilotCatalog.enableFileLogging', false);
 		logFilePath = path.join(context.globalStorageUri.fsPath, LOG_FILENAME);
@@ -302,6 +290,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		let currentRepo: Repository | undefined = repositories[0];
 		let resources: Resource[] = [];
+
+		remoteHatService.init(currentRepo);
 
 		// Helper function to refresh all tree providers
 		function refreshAllTrees() {
@@ -666,7 +656,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				logger.info('Remote cache cleared via command');
 			}),
 			vscode.commands.registerCommand('copilotCatalog.openDiscoverPanel', async () => {
-				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo, localRepoService.getLocalRepository());
+				DiscoverPanelProvider.createOrShow(context, remoteHatService, currentRepo);
 			}),
 			vscode.commands.registerCommand('copilotCatalog.openResource', async (item: any) => {
 				const res = pickResourceFromItem(item);
@@ -1240,23 +1230,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			}),
 			vscode.commands.registerCommand('copilotCatalog.discover.search', async () => {
 				// Open the discover panel for interactive searching
-				DiscoverPanelProvider.createOrShow(context, hatService, remoteHatService, currentRepo, localRepoService.getLocalRepository());
-			}),
-			vscode.commands.registerCommand('copilotCatalog.resetLocalRepo', async () => {
-				const choice = await vscode.window.showWarningMessage(
-					'Reset Local Repository?',
-					{ detail: 'This will delete all local hats and resources from the app data directory. This action cannot be undone.' },
-					'Reset', 'Cancel'
-				);
-				if (choice === 'Reset') {
-					try {
-						await localRepoService.reset();
-						vscode.window.showInformationMessage('Local repository has been reset successfully.');
-						await refresh(); // Refresh UI
-					} catch (error) {
-						await handleErrorWithNotification(error, 'Reset Local Repository Failed', logger.error.bind(logger), vscode);
-					}
-				}
+				DiscoverPanelProvider.createOrShow(context, remoteHatService, currentRepo);
 			}),
 			vscode.commands.registerCommand('copilotCatalog.addCatalogDirectory', async () => {
 				const cfg = vscode.workspace.getConfiguration();

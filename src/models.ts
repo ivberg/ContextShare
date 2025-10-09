@@ -57,6 +57,7 @@ export interface Resource {
 	tags?: string;           // Comma-separated tags (raw form)
 	size?: number;           // Original size if known (for informational tooltips)
 	truncated?: boolean;     // Indicates server truncated inline content
+	domainCategory?: string; // Domain-specific category (e.g., "azure", "automation", etc.)
 }
 
 export interface OperationResult { success: boolean; resource: Resource; message: string; details?: string }
