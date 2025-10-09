@@ -103,10 +103,7 @@ export class RemoteHatService {
 
     try {
       const hats: RemoteHatSummary[] = [];
-      //const adminUrl = this.baseUrl.replace('/catalog', '/admin/catalogs/1');
-      //const indexUrl = `${adminUrl}/resources`;
-      const resources: Resource[] = //await this.makeRequest(indexUrl);
-        await this.resourceService.discoverResources(this.repo);
+      const resources: Resource[] = await this.resourceService.discoverResources(this.repo);
 
       // Group resources by category for creating themed hats
       const categorizedResources = new Map<string, any[]>();
