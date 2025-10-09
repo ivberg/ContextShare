@@ -48,11 +48,6 @@ export class RemoteHatService {
     this.repo = repo;
   }
 
-  // setBaseUrl(url: string): void {
-  //   this.baseUrl = url.replace(/\/$/, ''); // Remove trailing slash
-  //   this.clearCache();
-  // }
-
   private async makeRequest(url: string): Promise<any> {
     return new Promise((resolve, reject) => {
       const client = url.startsWith('https:') ? https : http;
