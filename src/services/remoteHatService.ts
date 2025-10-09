@@ -4,6 +4,8 @@ import * as https from 'https';
 import * as http from 'http';
 import { logger } from '../utils/logger';
 import { getErrorMessage } from '../utils/errors';
+import { ResourceService } from './resourceService';
+import { Repository, Resource } from 'src/models';
 
 export interface RemoteHatSummary {
   id: string;
@@ -28,15 +30,28 @@ export interface RemoteResourceDetail {
 }
 
 export class RemoteHatService {
-  private baseUrl: string = '';
+  //private baseUrl: string = '';
+  private resourceService: ResourceService;
+  private repo: Repository | null = null;
   private hatsCache: RemoteHatSummary[] | null = null;
   private cacheTimestamp: number = 0;
   private cacheTtlMs: number = 5 * 60 * 1000; // 5 minutes
 
-  setBaseUrl(url: string): void {
-    this.baseUrl = url.replace(/\/$/, ''); // Remove trailing slash
-    this.clearCache();
+  constructor(
+    resourceService: ResourceService,
+  )
+  {
+    this.resourceService = resourceService;
   }
+
+  init(repo: Repository): void {
+    this.repo = repo;
+  }
+
+  // setBaseUrl(url: string): void {
+  //   this.baseUrl = url.replace(/\/$/, ''); // Remove trailing slash
+  //   this.clearCache();
+  // }
 
   private async makeRequest(url: string): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -75,8 +90,13 @@ export class RemoteHatService {
   }
 
   private async loadHatsFromServer(): Promise<RemoteHatSummary[]> {
-    if (!this.baseUrl) {
-      await logger.warn('RemoteHatService: No base URL configured');
+    // if (!this.baseUrl) {
+    //   await logger.warn('RemoteHatService: No base URL configured');
+    //   return [];
+    // }
+
+    if (!this.repo) {
+      await logger.warn('RemoteHatService: No repo configured')
       return [];
     }
 
@@ -88,15 +108,16 @@ export class RemoteHatService {
 
     try {
       const hats: RemoteHatSummary[] = [];
-      const adminUrl = this.baseUrl.replace('/catalog', '/admin/catalogs/1');
-      const indexUrl = `${adminUrl}/resources`;
-      const resources: any[] = await this.makeRequest(indexUrl);
+      //const adminUrl = this.baseUrl.replace('/catalog', '/admin/catalogs/1');
+      //const indexUrl = `${adminUrl}/resources`;
+      const resources: Resource[] = //await this.makeRequest(indexUrl);
+        await this.resourceService.discoverResources(this.repo);
 
       // Group resources by category for creating themed hats
       const categorizedResources = new Map<string, any[]>();
       
       for (const resource of resources) {
-        const category = resource.category || 'general';
+        const category = resource.domainCategory || 'general';
         if (!categorizedResources.has(category)) {
           categorizedResources.set(category, []);
         }
@@ -112,7 +133,7 @@ export class RemoteHatService {
           id: `catalog-${category}`,
           name: `${category} collection`,
           description: `All available ${category} resources (${categoryResources.length} items)`,
-          resources: categoryResources.map(r => r.content_url || r.filename),
+          resources: categoryResources.map(r => r.remoteUrl),
           resourceDetails: categoryResources, // Include full resource metadata
           author: categoryResources[0].catalog_name || 'Catalog',
           rating: undefined
@@ -155,167 +176,6 @@ export class RemoteHatService {
     const hat = hats.find((h: RemoteHatSummary) => h.id === id);
     await logger.info(`RemoteHatService.getHat id=${id} found=${!!hat}`);
     return hat;
-  }
-
-  async pullHat(id: string, targetWorkspacePath: string): Promise<boolean> {
-    try {
-      const hat = await this.getHat(id);
-      if (!hat) {
-        await logger.error(`Hat with id ${id} not found`);
-        return false;
-      }
-
-      if (!this.baseUrl) {
-        await logger.error('RemoteHatService: No base URL configured');
-        return false;
-      }
-
-      // Create the hat JSON file with resource references
-      const hatFileName = `${hat.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.json`;
-      const hatFilePath = require('path').join(targetWorkspacePath, '.github', 'hats', hatFileName);
-      
-      // Ensure the hats directory exists
-      const fs = require('fs');
-      const path = require('path');
-      const hatsDir = path.dirname(hatFilePath);
-      if (!fs.existsSync(hatsDir)) {
-        fs.mkdirSync(hatsDir, { recursive: true });
-      }
-
-      // Download each resource from server to local
-      const collectedResources: string[] = [];
-      
-      for (const resourcePath of hat.resources) {
-        try {
-          // Parse resource path (e.g., "instructions/example.instructions.md")
-          const [category, filename] = resourcePath.split('/');
-          const resourceUrl = `${this.baseUrl}/catalog/${category}/${filename}`;
-          
-          // Download resource content
-          const content = await this.makeRequest(resourceUrl);
-          
-          // Save to local runtime directory
-          const targetResourcePath = path.join(targetWorkspacePath, '.github', resourcePath);
-          const targetResourceDir = path.dirname(targetResourcePath);
-          
-          // Ensure target directory exists
-          if (!fs.existsSync(targetResourceDir)) {
-            fs.mkdirSync(targetResourceDir, { recursive: true });
-          }
-          
-          // Write the resource file
-          fs.writeFileSync(targetResourcePath, content, 'utf8');
-          collectedResources.push(resourcePath);
-          await logger.info(`Downloaded and saved resource: ${resourcePath}`);
-        } catch (error) {
-          await logger.warn(`Failed to download resource ${resourcePath}: ${getErrorMessage(error)}`);
-        }
-      }
-
-      // Create the hat file with metadata and resource list
-      const hatContent = {
-        id: hat.id,
-        name: hat.name,
-        description: hat.description,
-        author: hat.author,
-        rating: hat.rating,
-        resources: collectedResources,
-        pulledAt: new Date().toISOString(),
-        sourceServer: this.baseUrl
-      };
-
-      fs.writeFileSync(hatFilePath, JSON.stringify(hatContent, null, 2), 'utf8');
-      await logger.info(`Created hat file: ${hatFilePath} with ${collectedResources.length} resources`);
-      
-      return true;
-    } catch (error) {
-      await logger.error(`Failed to pull hat ${id}: ${getErrorMessage(error)}`);
-      return false;
-    }
-  }
-
-  /**
-   * Pull a hat and its resources to the local repository structure.
-   * Uses catalog/runtime structure instead of .github structure.
-   */
-  async pullHatToLocal(id: string, localRepoPath: string): Promise<boolean> {
-    try {
-      const hat = await this.getHat(id);
-      if (!hat) {
-        await logger.error(`Hat with id ${id} not found`);
-        return false;
-      }
-
-      if (!this.baseUrl) {
-        await logger.error('RemoteHatService: No base URL configured');
-        return false;
-      }
-
-      // Create the hat JSON file in the catalog/hats directory
-      const fs = require('fs');
-      const path = require('path');
-      const hatFileName = `${hat.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.json`;
-      const hatFilePath = path.join(localRepoPath, 'catalog', 'hats', hatFileName);
-      
-      // Ensure the hats directory exists
-      const hatsDir = path.dirname(hatFilePath);
-      if (!fs.existsSync(hatsDir)) {
-        fs.mkdirSync(hatsDir, { recursive: true });
-      }
-
-      // Download each resource from server to local catalog structure
-      const collectedResources: string[] = [];
-      
-      for (const resourcePath of hat.resources) {
-        try {
-          // Parse resource path (e.g., "instructions/example.instructions.md")
-          const [category, filename] = resourcePath.split('/');
-          const resourceUrl = `${this.baseUrl}/catalog/${category}/${filename}`;
-          
-          // Download resource content
-          const content = await this.makeRequest(resourceUrl);
-          
-          // Place resources in catalog directory (not runtime)
-          const targetResourcePath = path.join(localRepoPath, 'catalog', resourcePath);
-          const targetResourceDir = path.dirname(targetResourcePath);
-          
-          // Ensure target directory exists
-          if (!fs.existsSync(targetResourceDir)) {
-            fs.mkdirSync(targetResourceDir, { recursive: true });
-          }
-          
-          // Write the resource file
-          fs.writeFileSync(targetResourcePath, content, 'utf8');
-          collectedResources.push(resourcePath);
-          await logger.info(`Downloaded resource to local catalog: ${resourcePath}`);
-        } catch (error) {
-          await logger.warn(`Failed to download resource ${resourcePath}: ${getErrorMessage(error)}`);
-        }
-      }
-
-      // Create the hat file with metadata and resource list
-      const hatContent = {
-        name: hat.name,
-        description: hat.description,
-        resources: collectedResources,
-        // Store metadata about the remote source
-        _metadata: {
-          remoteId: hat.id,
-          author: hat.author,
-          rating: hat.rating,
-          pulledAt: new Date().toISOString(),
-          sourceServer: this.baseUrl
-        }
-      };
-
-      fs.writeFileSync(hatFilePath, JSON.stringify(hatContent, null, 2), 'utf8');
-      await logger.info(`Created local hat file: ${hatFilePath} with ${collectedResources.length} resources`);
-      
-      return true;
-    } catch (error) {
-      await logger.error(`Failed to pull hat ${id} to local repository: ${getErrorMessage(error)}`);
-      return false;
-    }
   }
 
   async applyHatToWorkspace(id: string): Promise<{ success: boolean; message?: string; appliedCount?: number }> {
@@ -439,9 +299,10 @@ export class RemoteHatService {
         url = resourcePath;
       } else {
         // Fallback to old path construction for compatibility
-        const category = resourcePath.split('/')[0];
-        const filename = resourcePath.split('/').slice(1).join('/');
-        url = `${this.baseUrl}/${category}/${filename}`;
+        // const category = resourcePath.split('/')[0];
+        // const filename = resourcePath.split('/').slice(1).join('/');
+        // url = `${this.baseUrl}/${category}/${filename}`;
+        url = 'unknown';
       }
       
       const response = await this.makeRequest(url);

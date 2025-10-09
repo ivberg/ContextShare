@@ -271,14 +271,9 @@
         "title": "User: Enable"
       },
       {
-        "command": "copilotCatalog.discover.begin",
-        "title": "ContextShare: Begin Discovery",
-        "icon": "$(search)"
-      },
-      {
         "command": "copilotCatalog.discover.search",
         "title": "ContextShare: Discover Search",
-        "icon": "$(filter)"
+        "icon": "$(search)"
       }
     ],
     "menus": {
