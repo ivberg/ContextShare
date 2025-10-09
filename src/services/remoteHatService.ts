@@ -30,7 +30,6 @@ export interface RemoteResourceDetail {
 }
 
 export class RemoteHatService {
-  //private baseUrl: string = '';
   private resourceService: ResourceService;
   private repo: Repository | null = null;
   private hatsCache: RemoteHatSummary[] | null = null;
@@ -85,11 +84,6 @@ export class RemoteHatService {
   }
 
   private async loadHatsFromServer(): Promise<RemoteHatSummary[]> {
-    // if (!this.baseUrl) {
-    //   await logger.warn('RemoteHatService: No base URL configured');
-    //   return [];
-    // }
-
     if (!this.repo) {
       await logger.warn('RemoteHatService: No repo configured')
       return [];
@@ -286,16 +280,7 @@ export class RemoteHatService {
   private async downloadResourceContent(resourcePath: string): Promise<string | null> {
     try {
       // If resourcePath is already a full URL (from content_url), use it directly
-      let url: string;
-      if (resourcePath.startsWith('http://') || resourcePath.startsWith('https://')) {
-        url = resourcePath;
-      } else {
-        // Fallback to old path construction for compatibility
-        // const category = resourcePath.split('/')[0];
-        // const filename = resourcePath.split('/').slice(1).join('/');
-        // url = `${this.baseUrl}/${category}/${filename}`;
-        url = 'unknown';
-      }
+      let url: string = resourcePath;
       
       const response = await this.makeRequest(url);
       return response.content || response || null;
