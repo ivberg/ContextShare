@@ -99,10 +99,29 @@ export class RemoteHatService {
       const hats: RemoteHatSummary[] = [];
       const resources: Resource[] = await this.resourceService.discoverResources(this.repo);
 
-      // Group resources by category for creating themed hats
+      // Filter to only show remote resources (not local catalog files)
+      const remoteResources = resources.filter(r => r.origin === 'remote');
+
+      // Check if there were any remote errors during discovery
+      // If all/most categories failed, we should show the error instead of partial results
+      const remoteErrors: string[] = [];
+      const categories = ['chatmodes', 'instructions', 'prompts', 'tasks', 'mcp'];
+      for (const cat of categories) {
+        const error = this.resourceService.getLastRemoteError(cat as any);
+        if (error) {
+          remoteErrors.push(`${cat}: ${error}`);
+        }
+      }
+      
+      // If we have remote errors and no remote resources, propagate the first error
+      if (remoteErrors.length > 0 && remoteResources.length === 0) {
+        throw new Error(remoteErrors[0].split(': ')[1] || remoteErrors[0]);
+      }
+
+      // Group resources by their domainCategory for creating themed hats
       const categorizedResources = new Map<string, any[]>();
       
-      for (const resource of resources) {
+      for (const resource of remoteResources) {
         const category = resource.domainCategory || 'general';
         if (!categorizedResources.has(category)) {
           categorizedResources.set(category, []);
@@ -114,12 +133,26 @@ export class RemoteHatService {
       for (const [category, categoryResources] of categorizedResources) {
         if (categoryResources.length === 0) continue;
 
+        // Validate and map resources with explicit error handling
+        const resourcePaths = categoryResources.map(r => {
+          if (r.remoteUrl) return r.remoteUrl;
+          if (r.absolutePath) return r.absolutePath;
+          // Log warning but continue - don't fail the entire operation
+          void logger.warn(`RemoteHatService: Resource ${r.id || '[unknown]'} missing both remoteUrl and absolutePath`);
+          return null;
+        }).filter((path): path is string => path !== null);
+
+        if (resourcePaths.length === 0) {
+          void logger.warn(`RemoteHatService: No valid resources for category ${category}`);
+          continue;
+        }
+
         // Create a single hat for the category
         hats.push({
           id: `catalog-${category}`,
           name: `${category} collection`,
-          description: `All available ${category} resources (${categoryResources.length} items)`,
-          resources: categoryResources.map(r => r.remoteUrl),
+          description: `All available ${category} resources (${resourcePaths.length} items)`,
+          resources: resourcePaths,
           resourceDetails: categoryResources, // Include full resource metadata
           author: categoryResources[0].catalog_name || 'Catalog',
           rating: undefined
@@ -129,11 +162,12 @@ export class RemoteHatService {
       this.hatsCache = hats;
       this.cacheTimestamp = now;
       
-      await logger.info(`RemoteHatService: Generated ${hats.length} hats from ${resources.length} resources`);
+      await logger.info(`RemoteHatService: Generated ${hats.length} hats from ${remoteResources.length} remote resources`);
       return hats;
     } catch (error) {
       await logger.error(`RemoteHatService: Failed to load hats from server: ${getErrorMessage(error)}`);
-      return [];
+      // Re-throw the error so the UI can display it to the user
+      throw error;
     }
   }
 
@@ -292,6 +326,10 @@ export class RemoteHatService {
 
   private async applyResourceToWorkspace(resourcePath: string, content: string, workspaceRoot: string, fileService: any): Promise<{ success: boolean; message: string }> {
     try {
+      if (!resourcePath || typeof resourcePath !== 'string') {
+        return { success: false, message: 'Invalid resource path' };
+      }
+      
       const path = await import('path');
       const split = resourcePath.split('/');
       const category = split.length > 2 && split[split.length - 2] || 'general';
@@ -331,6 +369,10 @@ export class RemoteHatService {
 
   private async applyResourceToUser(resourcePath: string, content: string, userDataPath: string, fileService: any): Promise<{ success: boolean; message: string }> {
     try {
+      if (!resourcePath || typeof resourcePath !== 'string') {
+        return { success: false, message: 'Invalid resource path' };
+      }
+      
       const path = await import('path');
       const split = resourcePath.split('/');
       const category = split.length > 2 && split[split.length - 2] || 'general';

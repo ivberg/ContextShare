@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 import { getVSCode } from '../utils/vscode';
-import { CatalogTreeItem, Repository, Resource, ResourceCategory, ResourceState } from '../models';
+import { CatalogTreeItem, IResourceService, Repository, Resource, ResourceCategory, ResourceState } from '../models';
 import { computeIconId } from './catalogTreeProvider';
 import { getDisplayName } from '../utils/display';
 
@@ -16,8 +16,9 @@ export class CategoryTreeProvider {
   private searchFilter?: string;
   private showFilterItem = false;
   private loading = false;
+  private remoteError?: string; // Track remote fetch errors for this category
   
-  constructor(private category: ResourceCategory) {}
+  constructor(private category: ResourceCategory, private resourceService?: IResourceService) {}
   
   setCatalogFilter(filter?: string) {
     this.catalogFilter = filter;
@@ -42,6 +43,12 @@ export class CategoryTreeProvider {
       if (this.catalogFilter && r.catalogName !== this.catalogFilter) return false;
       return true;
     });
+    
+    // Check for remote errors for this category
+    if (this.resourceService && this.resourceService.getLastRemoteError) {
+      this.remoteError = this.resourceService.getLastRemoteError(this.category);
+    }
+    
     this.refresh(); 
   }
   
@@ -57,7 +64,11 @@ export class CategoryTreeProvider {
       return [this.placeholderItem('Loading…')];
     }
     if(this.resources.length === 0){
-      return [this.placeholderItem(`No ${this.category} resources found.`)];
+      // Show remote error if present, otherwise generic "not found" message
+      const message = this.remoteError 
+        ? `Remote fetch failed: ${this.remoteError}` 
+        : `No ${this.category} resources found.`;
+      return [this.placeholderItem(message)];
     }
     
     // Return resources directly (no grouping needed since this is category-specific)

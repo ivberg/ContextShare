@@ -6,6 +6,7 @@
 
 import { ResourceCategory } from '../src/models';
 import { getDisplayName } from '../src/utils/display';
+import { createTestRunner } from './testUtils';
 
 type TestCase = {
   filename: string;
@@ -53,22 +54,24 @@ function testDisplayName(testCase: TestCase): boolean {
   return success;
 }
 
-console.log('Testing display name functionality...\n');
+async function run() {
+  console.log('Testing display name functionality...\n');
 
-let passedTests = 0;
+  let passedTests = 0;
 
-for (const testCase of testCases) {
-  if (testDisplayName(testCase)) {
-    passedTests++;
+  for (const testCase of testCases) {
+    if (testDisplayName(testCase)) {
+      passedTests++;
+    }
+  }
+
+  console.log(`\nResults: ${passedTests}/${testCases.length} tests passed`);
+
+  if (passedTests === testCases.length) {
+    console.log('🎉 All tests passed!');
+  } else {
+    throw new Error(`❌ ${testCases.length - passedTests} test(s) failed!`);
   }
 }
 
-console.log(`\nResults: ${passedTests}/${testCases.length} tests passed`);
-
-if (passedTests === testCases.length) {
-  console.log('🎉 All tests passed!');
-  process.exit(0);
-} else {
-  console.log('❌ Some tests failed!');
-  process.exit(1);
-}
+createTestRunner('display', run);

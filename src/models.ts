@@ -100,6 +100,7 @@ export interface IResourceService {
 	clearRemoteCache(): void;
 	enableUserResource(resource: Resource): Promise<OperationResult>;
 	disableUserResource(resource: Resource): Promise<OperationResult>;
+	getLastRemoteError?(category: ResourceCategory): string | undefined;
 }
 
 // Minimal tree item that works both inside VS Code and in tests
