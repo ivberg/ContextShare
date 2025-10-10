@@ -5,8 +5,18 @@ import * as assert from 'assert';
 import { ResourceService } from '../src/services/resourceService';
 import { MockFileService } from './fileService.mock';
 import { createTestPaths } from './testUtils';
-import { Repository, ResourceCategory } from '../src/models';
+import { Repository, Resource, ResourceCategory } from '../src/models';
 import * as http from 'http';
+
+// Type guard for lazy resources
+interface LazyResource extends Resource {
+  lazy: boolean;
+  remoteUrl: string;
+}
+
+function isLazyResource(resource: Resource): resource is LazyResource {
+  return resource.lazy === true && typeof resource.remoteUrl === 'string';
+}
 
 suite('Bulk Lazy Loading Tests', () => {
   
@@ -127,8 +137,9 @@ suite('Bulk Lazy Loading Tests', () => {
       
       // Resources should be marked as lazy
       const lazyResource = chatmodeResources[0];
-      assert.ok((lazyResource as any).lazy, 'Expected resource to be marked as lazy');
-      assert.ok((lazyResource as any).remoteUrl, 'Expected lazy resource to have remoteUrl');
+      assert.ok(isLazyResource(lazyResource), 'Expected resource to be marked as lazy with remoteUrl');
+      assert.strictEqual(lazyResource.lazy, true, 'Expected resource.lazy to be true');
+      assert.ok(lazyResource.remoteUrl, 'Expected lazy resource to have remoteUrl');
       
       // Test on-demand fetch functionality
       fetchCalls.length = 0; // Clear previous fetch calls
@@ -141,7 +152,7 @@ suite('Bulk Lazy Loading Tests', () => {
       assert.ok(onDemandCalls.length > 0, 'Expected on-demand fetch call for individual file');
       
       // Resource should now have content and not be lazy
-      assert.ok(!(lazyResource as any).lazy, 'Expected resource to no longer be lazy after fetch');
+      assert.strictEqual(lazyResource.lazy, false, 'Expected resource to no longer be lazy after fetch');
       
     } finally {
       server.close();

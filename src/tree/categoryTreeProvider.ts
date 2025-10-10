@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 import { getVSCode } from '../utils/vscode';
-import { CatalogTreeItem, Repository, Resource, ResourceCategory, ResourceState } from '../models';
+import { CatalogTreeItem, IResourceService, Repository, Resource, ResourceCategory, ResourceState } from '../models';
 import { computeIconId } from './catalogTreeProvider';
 import { getDisplayName } from '../utils/display';
 
@@ -18,7 +18,7 @@ export class CategoryTreeProvider {
   private loading = false;
   private remoteError?: string; // Track remote fetch errors for this category
   
-  constructor(private category: ResourceCategory, private resourceService?: any) {}
+  constructor(private category: ResourceCategory, private resourceService?: IResourceService) {}
   
   setCatalogFilter(filter?: string) {
     this.catalogFilter = filter;

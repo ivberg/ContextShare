@@ -133,12 +133,26 @@ export class RemoteHatService {
       for (const [category, categoryResources] of categorizedResources) {
         if (categoryResources.length === 0) continue;
 
+        // Validate and map resources with explicit error handling
+        const resourcePaths = categoryResources.map(r => {
+          if (r.remoteUrl) return r.remoteUrl;
+          if (r.absolutePath) return r.absolutePath;
+          // Log warning but continue - don't fail the entire operation
+          void logger.warn(`RemoteHatService: Resource ${r.id || '[unknown]'} missing both remoteUrl and absolutePath`);
+          return null;
+        }).filter((path): path is string => path !== null);
+
+        if (resourcePaths.length === 0) {
+          void logger.warn(`RemoteHatService: No valid resources for category ${category}`);
+          continue;
+        }
+
         // Create a single hat for the category
         hats.push({
           id: `catalog-${category}`,
           name: `${category} collection`,
-          description: `All available ${category} resources (${categoryResources.length} items)`,
-          resources: categoryResources.map(r => r.remoteUrl || r.absolutePath || '').filter(Boolean), // Filter out empty values
+          description: `All available ${category} resources (${resourcePaths.length} items)`,
+          resources: resourcePaths,
           resourceDetails: categoryResources, // Include full resource metadata
           author: categoryResources[0].catalog_name || 'Catalog',
           rating: undefined

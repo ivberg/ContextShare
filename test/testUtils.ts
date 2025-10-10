@@ -2,10 +2,7 @@
 // Licensed under the MIT License.
 import * as os from 'os';
 import * as path from 'path';
-
-// Mocha TDD interface for test integration
-declare function suite(name: string, fn: () => void): void;
-declare function test(name: string, fn: (this: Mocha.Context) => Promise<void>): void;
+import { suite, test } from 'mocha';
 
 /**
  * Test utilities for creating portable test paths and scenarios
