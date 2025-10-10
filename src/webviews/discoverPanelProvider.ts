@@ -35,6 +35,7 @@ export class DiscoverPanelProvider {
   private lastQuery: string = '';
   private remoteResults: DiscoverResult[] = [];
   private repo?: Repository;
+  private errorMessage?: string;
 
   public static createOrShow(
     context: vscode.ExtensionContext,
@@ -137,44 +138,51 @@ export class DiscoverPanelProvider {
   }
 
   private async performSearch(q: string) {
-    const items = await this.remoteHatService.queryHats(q);
-    this.remoteResults = await Promise.all(items.map(async i => {
-      // Get full hat data to calculate resource breakdown
-      const fullHat = await this.remoteHatService.getHat(i.id);
-      const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
-      
-      // Get detailed resource information for expansion
-      let resources: ResourceDetail[] = [];
-      if (fullHat) {
-        if (fullHat.resourceDetails && fullHat.resourceDetails.length > 0) {
-          // Use detailed resource metadata from admin API
-          resources = fullHat.resourceDetails.map((resource: any) => ({
-            filename: resource.filename || '',
-            title: this.extractTitle(resource.relativePath) || 'Unnamed Resource',
-            description: resource.description || 'No description available',
-            type: resource.category || 'unknown',
-            url: resource.remoteUrl || ''
-          }));
-        } else {
-          // Fallback to inferring from resource URLs
-          resources = await this.getResourceDetails(fullHat.resources);
+    try {
+      this.errorMessage = undefined; // Clear any previous errors
+      const items = await this.remoteHatService.queryHats(q);
+      this.remoteResults = await Promise.all(items.map(async i => {
+        // Get full hat data to calculate resource breakdown
+        const fullHat = await this.remoteHatService.getHat(i.id);
+        const resourceBreakdown = fullHat ? this.calculateResourceBreakdown(fullHat.resources) : 'Loading...';
+        
+        // Get detailed resource information for expansion
+        let resources: ResourceDetail[] = [];
+        if (fullHat) {
+          if (fullHat.resourceDetails && fullHat.resourceDetails.length > 0) {
+            // Use detailed resource metadata from admin API
+            resources = fullHat.resourceDetails.map((resource: any) => ({
+              filename: resource.filename || '',
+              title: this.extractTitle(resource.relativePath) || 'Unnamed Resource',
+              description: resource.description || 'No description available',
+              type: resource.category || 'unknown',
+              url: resource.remoteUrl || ''
+            }));
+          } else {
+            // Fallback to inferring from resource URLs
+            resources = await this.getResourceDetails(fullHat.resources);
+          }
         }
-      }
-      
-      // Check application status
-      const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
-      const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
-      
-      return {
-        id: i.id,
-        label: i.name,
-        description: i.description,
-        resourceBreakdown,
-        resources,
-        isAppliedToWorkspace,
-        isAppliedToUser
-      };
-    }));
+        
+        // Check application status
+        const isAppliedToWorkspace = await this.checkWorkspaceApplicationStatus(i.id);
+        const isAppliedToUser = await this.checkUserApplicationStatus(i.id);
+        
+        return {
+          id: i.id,
+          label: i.name,
+          description: i.description,
+          resourceBreakdown,
+          resources,
+          isAppliedToWorkspace,
+          isAppliedToUser
+        };
+      }));
+    } catch (error: any) {
+      console.error('Failed to search remote resources:', error);
+      this.errorMessage = this.getErrorMessage(error);
+      this.remoteResults = [];
+    }
 
     this._update();
   }
@@ -250,6 +258,13 @@ export class DiscoverPanelProvider {
     }
   }
 
+  private getErrorMessage(error: any): string {
+    if (!error) return 'Unknown error occurred';
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    return String(error);
+  }
+
   private extractTitle(path: string | null): string | null {
     if (!path) return null;
 
@@ -260,7 +275,8 @@ export class DiscoverPanelProvider {
 
   private async loadAllRemoteResources() {
     try {
-      // Show loading state
+      // Clear any previous errors and show loading state
+      this.errorMessage = undefined;
       this.remoteResults = [];
       this._update();
 
@@ -305,8 +321,9 @@ export class DiscoverPanelProvider {
         };
       }));
       this._update();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load remote resources:', error);
+      this.errorMessage = this.getErrorMessage(error);
       this.remoteResults = [];
       this._update();
     }
@@ -522,10 +539,22 @@ export class DiscoverPanelProvider {
     const currentResults = this.remoteResults;
     const hasWorkspace = !!vscode.workspace.workspaceFolders?.length;
     
+    // Show error message if present
+    const errorHtml = this.errorMessage ? `
+      <div class="error-banner">
+        <span class="codicon codicon-error"></span>
+        <div class="error-content">
+          <div class="error-title">Failed to load remote resources</div>
+          <div class="error-message">${escape(this.errorMessage)}</div>
+        </div>
+      </div>
+    ` : '';
+    
     const resultsHtml = currentResults.length === 0 ? `
       <div class="empty">
-        ${this.lastQuery ? `No results found for "${escape(this.lastQuery)}". Try a different search term.` : 
-          'Loading remote AI resources...'}
+        ${this.errorMessage ? '' : 
+          (this.lastQuery ? `No results found for "${escape(this.lastQuery)}". Try a different search term.` : 
+          'Loading remote AI resources...')}
       </div>
     ` : currentResults.map((r: DiscoverResult) => `
       <div class="result" data-id="${escape(r.id)}">
@@ -689,6 +718,39 @@ export class DiscoverPanelProvider {
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+        
+        .error-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 6px;
+            background: var(--vscode-inputValidation-errorBackground);
+            border: 1px solid var(--vscode-inputValidation-errorBorder);
+            color: var(--vscode-inputValidation-errorForeground);
+        }
+        
+        .error-banner .codicon {
+            font-size: 16px;
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+        
+        .error-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .error-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .error-message {
+            font-size: 12px;
+            line-height: 1.4;
         }
         
         .results-section h2 {
@@ -942,6 +1004,7 @@ export class DiscoverPanelProvider {
         
         .codicon-repo:before { content: "\\eab2"; }
         .codicon-warning:before { content: "\\ea6c"; }
+        .codicon-error:before { content: "\\ea87"; }
     </style>
 </head>
 <body>
@@ -951,6 +1014,8 @@ export class DiscoverPanelProvider {
     </div>
     
     ${repoStatus}
+    
+    ${errorHtml}
     
     <div class="page-title">
         <h2>Search Catalog Resources</h2>

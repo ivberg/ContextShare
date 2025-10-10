@@ -147,11 +147,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		
 		const hatService = new HatService(fileService, resourceService, context.globalStorageUri.fsPath);
 		// Configure hat service to use local repository
-		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES);
-		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS);
-		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS);
-		const tasksTree = new CategoryTreeProvider(ResourceCategory.TASKS);
-	const mcpTree = new CategoryTreeProvider(ResourceCategory.MCP);
+		const chatmodesTree = new CategoryTreeProvider(ResourceCategory.CHATMODES, resourceService);
+		const instructionsTree = new CategoryTreeProvider(ResourceCategory.INSTRUCTIONS, resourceService);
+		const promptsTree = new CategoryTreeProvider(ResourceCategory.PROMPTS, resourceService);
+		const tasksTree = new CategoryTreeProvider(ResourceCategory.TASKS, resourceService);
+	const mcpTree = new CategoryTreeProvider(ResourceCategory.MCP, resourceService);
 	const optionsTree = new OptionsTreeProvider();
 
 		// Track whether we've warned user about read-only catalog views

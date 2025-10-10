@@ -3,6 +3,10 @@
 import * as os from 'os';
 import * as path from 'path';
 
+// Mocha TDD interface for test integration
+declare function suite(name: string, fn: () => void): void;
+declare function test(name: string, fn: (this: Mocha.Context) => Promise<void>): void;
+
 /**
  * Test utilities for creating portable test paths and scenarios
  */
@@ -218,13 +222,24 @@ export function logTestStep(testDescription: string): void {
 }
 
 /**
- * Creates a test runner with consistent error handling
+ * Creates a test runner with consistent error handling that integrates with Mocha
  * @param testName - Name of the test suite for error reporting
  * @param testFunction - The test function to run
  */
 export function createTestRunner(testName: string, testFunction: () => Promise<void>): void {
-  testFunction().catch(e => {
-    console.error(`${testName}.test FAIL`, e);
-    process.exit(1);
+  // Integrate with Mocha TDD interface instead of running standalone
+  // This ensures failures are properly reported and propagate to the test runner
+  suite(testName, () => {
+    test('should run all tests', async function() {
+      // Set a longer timeout for integration tests
+      this.timeout(30000);
+      try {
+        await testFunction();
+      } catch (error) {
+        // Re-throw with enhanced error message to ensure visibility
+        console.error(`\n❌ TEST FAILURE in ${testName}:`, error);
+        throw error;
+      }
+    });
   });
 }

@@ -27,6 +27,8 @@ export class ResourceService implements IResourceService {
   private disableLogRedaction = false; // dev-only: show raw paths/URLs
   private enableLazyRemote = true; // feature flag for lazy remote loading
   private bulkEndpointPath = '/catalog/catalog-export';
+  private lastRemoteErrors: Map<ResourceCategory, string> = new Map(); // Track remote fetch errors per category
+  
   constructor(private fileService: IFileService){}
 
   // Optional logger injected by host extension
@@ -59,6 +61,11 @@ export class ResourceService implements IResourceService {
   enableInsecureHttpForDev(flag: boolean){
     this.allowInsecureHttp = !!flag;
     this.log(`[ResourceService] allowInsecureHttp=${this.allowInsecureHttp}`);
+  }
+
+  /** Get the last remote fetch error for a specific category, if any */
+  getLastRemoteError(category: ResourceCategory): string | undefined {
+    return this.lastRemoteErrors.get(category);
   }
 
   /** Dev-only: disable log redaction to aid debugging */
@@ -123,6 +130,10 @@ export class ResourceService implements IResourceService {
     const resources: Resource[] = [];
     const t0 = Date.now();
     let remoteSuccess = 0, remoteFailed = 0;
+    
+    // Clear previous remote errors at the start of discovery
+    this.lastRemoteErrors.clear();
+    
     this.log(`[ResourceService] discoverResources start repo=${repository.name} catalog=${repository.catalogPath} rootOverride=${this.rootCatalogOverride || '(none)'} targetWs=${this.targetWorkspaceOverride || '(none)'} currentWs=${this.currentWorkspaceRoot || '(none)'} runtimeDir=${this.runtimeDirectoryName}`);
 
     // Bulk export lazy discovery (only when not using root override and at least one remote override exists)
@@ -284,7 +295,9 @@ export class ResourceService implements IResourceService {
             remoteSuccess++;
           }
           } catch (e:any) { 
-            this.log(`[ResourceService] remote source failed for ${category}: ${sanitizeErrorMessage(e)}`); 
+            const errorMsg = sanitizeErrorMessage(e);
+            this.log(`[ResourceService] remote source failed for ${category}: ${errorMsg}`); 
+            this.lastRemoteErrors.set(category, errorMsg); // Store error for UI display
             remoteFailed++; 
             // Continue with other sources even if remote fails
           }
@@ -603,7 +616,18 @@ export class ResourceService implements IResourceService {
 
   private collectResponse(res: IncomingMessage, resolve: (v:string)=>void, reject:(e:any)=>void, maxBytes: number){
     if(res.statusCode !== 200){ 
-      reject(new Error(`HTTP ${res.statusCode}`)); 
+      // Provide helpful error messages based on status code
+      let errorMessage = `HTTP ${res.statusCode}`;
+      if (res.statusCode === 403) {
+        errorMessage = 'Access forbidden (VPN required?)';
+      } else if (res.statusCode === 401) {
+        errorMessage = 'Authentication required';
+      } else if (res.statusCode === 404) {
+        errorMessage = 'Resource not found';
+      } else if (res.statusCode && res.statusCode >= 500) {
+        errorMessage = `Server error (HTTP ${res.statusCode})`;
+      }
+      reject(new Error(errorMessage)); 
       return; 
     }
     

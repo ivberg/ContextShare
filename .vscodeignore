@@ -31,6 +31,7 @@ hackathon--*.md
 example-catalog/
 scripts/
 debug-*.js
+server/
 
 # 3. Exclude build & packaging helpers
 build/
